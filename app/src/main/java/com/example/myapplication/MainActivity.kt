@@ -39,6 +39,7 @@ import com.example.myapplication.model.QuaternionData
 import com.example.myapplication.model.Vector3
 import com.example.myapplication.network.StreamingState
 import com.example.myapplication.network.TestPacketStreamer
+import com.example.myapplication.renderer.PhoneScene
 import com.example.myapplication.sensor.SensorAvailability
 import com.example.myapplication.sensor.SensorCollector
 import com.example.myapplication.sensor.SensorState
@@ -119,6 +120,8 @@ private fun MotionSenderScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            MotionSceneCard(sensorState.quaternion)
+
             SensorDataCard(sensorState)
 
             Text(
@@ -183,6 +186,30 @@ private fun MotionSenderScreen(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Показания сверху уже реальные. UDP пока отправляет фиксированные тестовые значения — подключим к датчикам отдельным шагом.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MotionSceneCard(quaternion: QuaternionData?) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column {
+            PhoneScene(
+                quaternion = quaternion,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp),
+            )
+            Text(
+                text = if (quaternion == null) {
+                    "3D-сцена ожидает данные rotation vector"
+                } else {
+                    "3D-сцена повторяет абсолютную ориентацию телефона"
+                },
+                modifier = Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
