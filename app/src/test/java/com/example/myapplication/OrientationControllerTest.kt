@@ -1,6 +1,7 @@
 package com.example.myapplication
 
 import com.example.myapplication.model.QuaternionData
+import com.example.myapplication.model.Vector3
 import com.example.myapplication.processing.OrientationController
 import com.example.myapplication.processing.TrackingMode
 import kotlin.math.sqrt
@@ -76,8 +77,37 @@ class OrientationControllerTest {
         assertTrue(state.displayQuaternion.z < state.targetQuaternion.z)
     }
 
+    @Test
+    fun visualPositionStartsAtOriginAndDoesNotJumpAfterPause() {
+        val controller = OrientationController()
+        controller.updateSensorQuaternion(identity)
+        controller.updateEstimatedPosition(Vector3(5.0, 0.0, 0.0))
+        controller.startOrResumeTracking()
+
+        assertVectorEquals(Vector3(0.0, 0.0, 0.0), controller.state.value.displayPosition)
+
+        controller.updateEstimatedPosition(Vector3(5.2, 0.0, 0.0))
+        assertVectorEquals(Vector3(0.2, 0.0, 0.0), controller.state.value.displayPosition)
+
+        controller.pauseTracking()
+        controller.updateEstimatedPosition(Vector3(6.0, 0.0, 0.0))
+        assertVectorEquals(Vector3(0.2, 0.0, 0.0), controller.state.value.displayPosition)
+
+        controller.startOrResumeTracking()
+        assertVectorEquals(Vector3(0.2, 0.0, 0.0), controller.state.value.displayPosition)
+
+        controller.updateEstimatedPosition(Vector3(6.1, 0.0, 0.0))
+        assertVectorEquals(Vector3(0.3, 0.0, 0.0), controller.state.value.displayPosition)
+    }
+
     private fun assertQuaternionEquals(expected: QuaternionData, actual: QuaternionData) {
         assertEquals(expected.w, actual.w, 0.0001)
+        assertEquals(expected.x, actual.x, 0.0001)
+        assertEquals(expected.y, actual.y, 0.0001)
+        assertEquals(expected.z, actual.z, 0.0001)
+    }
+
+    private fun assertVectorEquals(expected: Vector3, actual: Vector3) {
         assertEquals(expected.x, actual.x, 0.0001)
         assertEquals(expected.y, actual.y, 0.0001)
         assertEquals(expected.z, actual.z, 0.0001)

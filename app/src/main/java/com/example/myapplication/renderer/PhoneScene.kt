@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.myapplication.model.QuaternionData
+import com.example.myapplication.model.Vector3
 
 private class PhoneGLSurfaceView(context: Context) : GLSurfaceView(context) {
     private val phoneRenderer = PhoneRenderer()
@@ -20,9 +21,13 @@ private class PhoneGLSurfaceView(context: Context) : GLSurfaceView(context) {
         renderMode = RENDERMODE_WHEN_DIRTY
     }
 
-    fun updateQuaternion(quaternion: QuaternionData?) {
-        phoneRenderer.updateQuaternion(
-            quaternion ?: QuaternionData(w = 1.0, x = 0.0, y = 0.0, z = 0.0),
+    fun updatePose(
+        quaternion: QuaternionData?,
+        position: Vector3?,
+    ) {
+        phoneRenderer.updatePose(
+            quaternion = quaternion ?: QuaternionData(w = 1.0, x = 0.0, y = 0.0, z = 0.0),
+            position = position ?: Vector3(x = 0.0, y = 0.0, z = 0.0),
         )
         requestRender()
     }
@@ -31,6 +36,7 @@ private class PhoneGLSurfaceView(context: Context) : GLSurfaceView(context) {
 @Composable
 fun PhoneScene(
     quaternion: QuaternionData?,
+    position: Vector3?,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -46,6 +52,6 @@ fun PhoneScene(
     AndroidView(
         factory = { surfaceView },
         modifier = modifier,
-        update = { view -> view.updateQuaternion(quaternion) },
+        update = { view -> view.updatePose(quaternion, position) },
     )
 }

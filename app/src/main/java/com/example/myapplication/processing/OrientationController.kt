@@ -1,6 +1,7 @@
 package com.example.myapplication.processing
 
 import com.example.myapplication.model.QuaternionData
+import com.example.myapplication.model.Vector3
 import kotlin.math.exp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,8 @@ data class OrientationTrackingState(
     val sensorQuaternion: QuaternionData? = null,
     val targetQuaternion: QuaternionData = IDENTITY_QUATERNION,
     val displayQuaternion: QuaternionData = IDENTITY_QUATERNION,
+    val estimatedPosition: Vector3 = ZERO_TRACKING_POSITION,
+    val displayPosition: Vector3 = ZERO_TRACKING_POSITION,
     val sensorTimestampNanos: Long = 0L,
 )
 
@@ -27,6 +30,8 @@ class OrientationController {
     private var referenceQuaternion = IDENTITY_QUATERNION
     private var baseDisplayQuaternion = IDENTITY_QUATERNION
     private var lastSmoothingTimestampNanos = 0L
+    private var referencePosition = ZERO_TRACKING_POSITION
+    private var baseDisplayPosition = ZERO_TRACKING_POSITION
 
     @Synchronized
     fun updateSensorQuaternion(
@@ -57,6 +62,20 @@ class OrientationController {
     }
 
     @Synchronized
+    fun updateEstimatedPosition(position: Vector3) {
+        val currentState = _state.value
+        val displayPosition = if (currentState.mode == TrackingMode.TRACKING) {
+            baseDisplayPosition + (position - referencePosition)
+        } else {
+            currentState.displayPosition
+        }
+        _state.value = currentState.copy(
+            estimatedPosition = position,
+            displayPosition = displayPosition,
+        )
+    }
+
+    @Synchronized
     fun startOrResumeTracking() {
         val currentState = _state.value
         val currentQuaternion = currentState.sensorQuaternion ?: return
@@ -66,10 +85,13 @@ class OrientationController {
                 referenceQuaternion = currentQuaternion
                 baseDisplayQuaternion = IDENTITY_QUATERNION
                 lastSmoothingTimestampNanos = currentState.sensorTimestampNanos
+                referencePosition = currentState.estimatedPosition
+                baseDisplayPosition = ZERO_TRACKING_POSITION
                 _state.value = currentState.copy(
                     mode = TrackingMode.TRACKING,
                     targetQuaternion = IDENTITY_QUATERNION,
                     displayQuaternion = IDENTITY_QUATERNION,
+                    displayPosition = ZERO_TRACKING_POSITION,
                 )
             }
 
@@ -78,6 +100,8 @@ class OrientationController {
                 referenceQuaternion = currentQuaternion
                 baseDisplayQuaternion = currentState.displayQuaternion
                 lastSmoothingTimestampNanos = currentState.sensorTimestampNanos
+                referencePosition = currentState.estimatedPosition
+                baseDisplayPosition = currentState.displayPosition
                 _state.value = currentState.copy(
                     mode = TrackingMode.TRACKING,
                     targetQuaternion = currentState.displayQuaternion,
@@ -107,6 +131,16 @@ class OrientationController {
         _state.value = currentState.copy(
             targetQuaternion = IDENTITY_QUATERNION,
             displayQuaternion = IDENTITY_QUATERNION,
+        )
+    }
+
+    @Synchronized
+    fun resetDisplayPosition(estimatedPosition: Vector3 = _state.value.estimatedPosition) {
+        referencePosition = estimatedPosition
+        baseDisplayPosition = ZERO_TRACKING_POSITION
+        _state.value = _state.value.copy(
+            estimatedPosition = estimatedPosition,
+            displayPosition = ZERO_TRACKING_POSITION,
         )
     }
 
@@ -155,4 +189,18 @@ class OrientationController {
         const val MAX_RESPONSE_BOOST = 0.3
         const val MAX_SMOOTHING_FACTOR = 0.85
     }
+
+    private operator fun Vector3.plus(other: Vector3) = Vector3(
+        x = x + other.x,
+        y = y + other.y,
+        z = z + other.z,
+    )
+
+    private operator fun Vector3.minus(other: Vector3) = Vector3(
+        x = x - other.x,
+        y = y - other.y,
+        z = z - other.z,
+    )
 }
+
+private val ZERO_TRACKING_POSITION = Vector3(x = 0.0, y = 0.0, z = 0.0)

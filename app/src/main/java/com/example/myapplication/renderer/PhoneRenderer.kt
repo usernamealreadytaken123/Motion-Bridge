@@ -4,6 +4,7 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import com.example.myapplication.model.QuaternionData
+import com.example.myapplication.model.Vector3
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -12,31 +13,38 @@ import javax.microedition.khronos.opengles.GL10
 
 internal class PhoneRenderer : GLSurfaceView.Renderer {
     private val vertices = buildPhoneVertices()
-    private val vertexBuffer: FloatBuffer = ByteBuffer
-        .allocateDirect(vertices.size * Float.SIZE_BYTES)
-        .order(ByteOrder.nativeOrder())
-        .asFloatBuffer()
-        .apply {
-            put(vertices)
-            position(0)
-        }
+    private val vertexBuffer = vertices.toFloatBuffer()
+    private val gridVertices = buildGridVertices()
+    private val gridBuffer = gridVertices.toFloatBuffer()
+    private val axisVertices = buildAxisVertices()
+    private val axisBuffer = axisVertices.toFloatBuffer()
 
     private val projectionMatrix = FloatArray(16)
     private val viewMatrix = FloatArray(16)
     private val modelMatrix = FloatArray(16)
     private val modelViewMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
+    private val sceneMvpMatrix = FloatArray(16)
+    private val rotationScaleMatrix = FloatArray(16)
+    private val translationMatrix = FloatArray(16)
 
     @Volatile
     private var quaternion = QuaternionData(w = 1.0, x = 0.0, y = 0.0, z = 0.0)
+
+    @Volatile
+    private var position = Vector3(x = 0.0, y = 0.0, z = 0.0)
 
     private var program = 0
     private var positionHandle = 0
     private var colorHandle = 0
     private var mvpMatrixHandle = 0
 
-    fun updateQuaternion(value: QuaternionData) {
-        quaternion = value
+    fun updatePose(
+        quaternion: QuaternionData,
+        position: Vector3,
+    ) {
+        this.quaternion = quaternion
+        this.position = position
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -79,40 +87,92 @@ internal class PhoneRenderer : GLSurfaceView.Renderer {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         GLES20.glUseProgram(program)
 
+        Matrix.multiplyMM(sceneMvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
+        drawVertices(
+            buffer = gridBuffer,
+            vertexCount = gridVertices.size / FLOATS_PER_VERTEX,
+            matrix = sceneMvpMatrix,
+            primitive = GLES20.GL_LINES,
+            lineWidth = 1f,
+        )
+        drawVertices(
+            buffer = axisBuffer,
+            vertexCount = axisVertices.size / FLOATS_PER_VERTEX,
+            matrix = sceneMvpMatrix,
+            primitive = GLES20.GL_LINES,
+            lineWidth = 3f,
+        )
+
         val rotationMatrix = quaternion.toOpenGlRotationMatrix()
-        rotationMatrix.copyInto(modelMatrix)
-        Matrix.scaleM(modelMatrix, 0, PHONE_WIDTH, PHONE_HEIGHT, PHONE_DEPTH)
+        rotationMatrix.copyInto(rotationScaleMatrix)
+        Matrix.scaleM(rotationScaleMatrix, 0, PHONE_WIDTH, PHONE_HEIGHT, PHONE_DEPTH)
+
+        val translation = position.toSceneTranslation()
+        Matrix.setIdentityM(translationMatrix, 0)
+        Matrix.translateM(
+            translationMatrix,
+            0,
+            translation.x,
+            translation.y,
+            translation.z,
+        )
+        Matrix.multiplyMM(modelMatrix, 0, translationMatrix, 0, rotationScaleMatrix, 0)
         Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0)
         Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0)
 
-        vertexBuffer.position(POSITION_OFFSET_FLOATS)
+        drawVertices(
+            buffer = vertexBuffer,
+            vertexCount = VERTEX_COUNT,
+            matrix = mvpMatrix,
+            primitive = GLES20.GL_TRIANGLES,
+        )
+    }
+
+    private fun drawVertices(
+        buffer: FloatBuffer,
+        vertexCount: Int,
+        matrix: FloatArray,
+        primitive: Int,
+        lineWidth: Float = 1f,
+    ) {
+        buffer.position(POSITION_OFFSET_FLOATS)
         GLES20.glVertexAttribPointer(
             positionHandle,
             POSITION_COMPONENTS,
             GLES20.GL_FLOAT,
             false,
             VERTEX_STRIDE_BYTES,
-            vertexBuffer,
+            buffer,
         )
         GLES20.glEnableVertexAttribArray(positionHandle)
 
-        vertexBuffer.position(COLOR_OFFSET_FLOATS)
+        buffer.position(COLOR_OFFSET_FLOATS)
         GLES20.glVertexAttribPointer(
             colorHandle,
             COLOR_COMPONENTS,
             GLES20.GL_FLOAT,
             false,
             VERTEX_STRIDE_BYTES,
-            vertexBuffer,
+            buffer,
         )
         GLES20.glEnableVertexAttribArray(colorHandle)
 
-        GLES20.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mvpMatrix, 0)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, VERTEX_COUNT)
+        GLES20.glUniformMatrix4fv(mvpMatrixHandle, 1, false, matrix, 0)
+        GLES20.glLineWidth(lineWidth)
+        GLES20.glDrawArrays(primitive, 0, vertexCount)
 
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(colorHandle)
     }
+
+    private fun FloatArray.toFloatBuffer(): FloatBuffer = ByteBuffer
+        .allocateDirect(size * Float.SIZE_BYTES)
+        .order(ByteOrder.nativeOrder())
+        .asFloatBuffer()
+        .apply {
+            put(this@toFloatBuffer)
+            position(0)
+        }
 
     private fun createProgram(vertexShaderCode: String, fragmentShaderCode: String): Int {
         val vertexShader = compileShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)

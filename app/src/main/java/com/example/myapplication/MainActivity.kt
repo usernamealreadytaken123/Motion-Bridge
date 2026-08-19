@@ -44,15 +44,23 @@ import com.example.myapplication.network.TestPacketStreamer
 import com.example.myapplication.processing.CalibrationController
 import com.example.myapplication.processing.CalibrationState
 import com.example.myapplication.processing.CalibrationStatus
+import com.example.myapplication.processing.MotionAnalysisController
+import com.example.myapplication.processing.MotionAnalysisState
+import com.example.myapplication.processing.MotionStatus
 import com.example.myapplication.processing.OrientationController
 import com.example.myapplication.processing.OrientationTrackingState
+import com.example.myapplication.processing.PositionEstimator
+import com.example.myapplication.processing.PositionState
 import com.example.myapplication.processing.TrackingMode
+import com.example.myapplication.processing.VelocityEstimator
+import com.example.myapplication.processing.VelocityState
 import com.example.myapplication.renderer.PhoneScene
 import com.example.myapplication.sensor.SensorAvailability
 import com.example.myapplication.sensor.SensorCollector
 import com.example.myapplication.sensor.SensorState
 import com.example.myapplication.ui.theme.MyApplicationTheme
 import java.util.Locale
+import kotlin.math.sqrt
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -60,6 +68,9 @@ class MainActivity : ComponentActivity() {
     private val streamer = TestPacketStreamer()
     private val orientationController = OrientationController()
     private val calibrationController = CalibrationController()
+    private val motionAnalysisController = MotionAnalysisController()
+    private val velocityEstimator = VelocityEstimator()
+    private val positionEstimator = PositionEstimator()
     private lateinit var sensorCollector: SensorCollector
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,6 +89,31 @@ class MainActivity : ComponentActivity() {
                     linearAcceleration = sensorState.linearAcceleration,
                     timestampNanos = sensorState.timestampNanos,
                 )
+                val calibrationState = calibrationController.state.value
+                motionAnalysisController.update(
+                    isCalibrated = calibrationState.status == CalibrationStatus.CALIBRATED,
+                    correctedGyroscope = calibrationState.correctedGyroscope,
+                    correctedLinearAcceleration =
+                        calibrationState.correctedLinearAcceleration,
+                    orientationQuaternion = sensorState.quaternion,
+                    timestampNanos = sensorState.timestampNanos,
+                )
+                val motionState = motionAnalysisController.state.value
+                velocityEstimator.update(
+                    isCalibrated = calibrationState.status == CalibrationStatus.CALIBRATED,
+                    motionStatus = motionState.status,
+                    worldLinearAcceleration = motionState.worldLinearAcceleration,
+                    timestampNanos = sensorState.timestampNanos,
+                )
+                positionEstimator.update(
+                    isCalibrated = calibrationState.status == CalibrationStatus.CALIBRATED,
+                    motionStatus = motionState.status,
+                    velocityState = velocityEstimator.state.value,
+                    timestampNanos = sensorState.timestampNanos,
+                )
+                orientationController.updateEstimatedPosition(
+                    positionEstimator.state.value.position,
+                )
             }
         }
         enableEdgeToEdge()
@@ -87,18 +123,36 @@ class MainActivity : ComponentActivity() {
                 val sensorState by sensorCollector.state.collectAsState()
                 val orientationState by orientationController.state.collectAsState()
                 val calibrationState by calibrationController.state.collectAsState()
+                val motionAnalysisState by motionAnalysisController.state.collectAsState()
+                val velocityState by velocityEstimator.state.collectAsState()
+                val positionState by positionEstimator.state.collectAsState()
                 MotionSenderScreen(
                     streamingState = streamingState,
                     sensorState = sensorState,
                     orientationState = orientationState,
                     calibrationState = calibrationState,
+                    motionAnalysisState = motionAnalysisState,
+                    velocityState = velocityState,
+                    positionState = positionState,
                     onStartUdp = streamer::start,
                     onStopUdp = streamer::stop,
                     onStartOrResumeTracking = orientationController::startOrResumeTracking,
                     onPauseTracking = orientationController::pauseTracking,
                     onCenterOrientation = orientationController::centerOrientation,
+                    onResetPosition = {
+                        positionEstimator.resetPosition()
+                        orientationController.resetDisplayPosition(
+                            positionEstimator.state.value.position,
+                        )
+                    },
                     onStartCalibration = {
                         orientationController.pauseTracking()
+                        motionAnalysisController.reset()
+                        velocityEstimator.reset()
+                        positionEstimator.reset()
+                        orientationController.resetDisplayPosition(
+                            positionEstimator.state.value.position,
+                        )
                         calibrationController.startCalibration()
                     },
                 )
@@ -115,6 +169,9 @@ class MainActivity : ComponentActivity() {
         streamer.stop()
         orientationController.pauseTracking()
         calibrationController.cancelCalibration()
+        velocityEstimator.reset()
+        positionEstimator.reset()
+        orientationController.resetDisplayPosition(positionEstimator.state.value.position)
         sensorCollector.stop()
         super.onStop()
     }
@@ -132,11 +189,15 @@ private fun MotionSenderScreen(
     sensorState: SensorState,
     orientationState: OrientationTrackingState,
     calibrationState: CalibrationState,
+    motionAnalysisState: MotionAnalysisState,
+    velocityState: VelocityState,
+    positionState: PositionState,
     onStartUdp: (String, Int) -> Unit,
     onStopUdp: () -> Unit,
     onStartOrResumeTracking: () -> Unit,
     onPauseTracking: () -> Unit,
     onCenterOrientation: () -> Unit,
+    onResetPosition: () -> Unit,
     onStartCalibration: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -179,6 +240,13 @@ private fun MotionSenderScreen(
                 onPauseTracking = onPauseTracking,
                 onCenterOrientation = onCenterOrientation,
                 onStartCalibration = onStartCalibration,
+            )
+
+            MotionAnalysisCard(
+                state = motionAnalysisState,
+                velocityState = velocityState,
+                positionState = positionState,
+                onResetPosition = onResetPosition,
             )
 
             SensorDataCard(
@@ -256,11 +324,122 @@ private fun MotionSenderScreen(
 }
 
 @Composable
+private fun MotionAnalysisCard(
+    state: MotionAnalysisState,
+    velocityState: VelocityState,
+    positionState: PositionState,
+    onResetPosition: () -> Unit,
+) {
+    val containerColor = when (state.status) {
+        MotionStatus.STATIONARY -> MaterialTheme.colorScheme.tertiaryContainer
+        MotionStatus.MOVING -> MaterialTheme.colorScheme.primaryContainer
+        MotionStatus.CHECKING,
+        MotionStatus.NOT_READY,
+        -> MaterialTheme.colorScheme.surfaceVariant
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Состояние: ${motionStatusText(state.status)}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            state.filteredGyroscope?.let { gyroscope ->
+                Text(
+                    text = "Фильтрованный гироскоп\n${gyroscope.formatted()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            state.filteredLinearAcceleration?.let { acceleration ->
+                Text(
+                    text = "Фильтрованное ускорение\n${acceleration.formatted()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            state.worldLinearAcceleration?.let { acceleration ->
+                Text(
+                    text = "Ускорение в мировых координатах\n${acceleration.formatted()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Оси мира: X — восток, Y — вверх, Z — юг",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (velocityState.isAvailable) {
+                Text(
+                    text = "Оценочная скорость, м/с\n${velocityState.velocity.formatted()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Модуль скорости: ${velocityState.velocity.magnitude().formatValue()} м/с",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = when {
+                        velocityState.zeroedByStationary -> "ZUPT: скорость обнулена"
+                        velocityState.isIntegrating -> "Интегрирование скорости активно"
+                        else -> "Ожидание подтверждённого движения"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (positionState.isAvailable) {
+                Text(
+                    text = "Оценочная позиция, м\n${positionState.position.formatted()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (positionState.isIntegrating) {
+                        "Интегрирование позиции активно"
+                    } else {
+                        "Позиция сохранена"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = onResetPosition,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Сбросить положение")
+                }
+            }
+        }
+    }
+}
+
+private fun motionStatusText(status: MotionStatus): String = when (status) {
+    MotionStatus.NOT_READY -> "ожидается калибровка"
+    MotionStatus.CHECKING -> "определение…"
+    MotionStatus.STATIONARY -> "неподвижен"
+    MotionStatus.MOVING -> "движется"
+}
+
+@Composable
 private fun MotionSceneCard(state: OrientationTrackingState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column {
             PhoneScene(
                 quaternion = state.displayQuaternion,
+                position = state.displayPosition,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(320.dp),
@@ -276,6 +455,19 @@ private fun MotionSceneCard(state: OrientationTrackingState) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(
+                text = "Перемещение увеличено в 2 раза и ограничено границами сцены",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Оси: X — красная, Y — зелёная, Z — синяя",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 }
@@ -493,6 +685,10 @@ private fun Vector3.formatted(): String = String.format(
     z,
 )
 
+private fun Vector3.magnitude(): Double = sqrt(x * x + y * y + z * z)
+
+private fun Double.formatValue(): String = String.format(Locale.US, "%.3f", this)
+
 @Composable
 private fun StatusCard(state: StreamingState) {
     val containerColor = when {
@@ -547,11 +743,28 @@ private fun MotionSenderScreenPreview() {
                 sensorQuaternion = QuaternionData(1.0, 0.0, 0.0, 0.0),
             ),
             calibrationState = CalibrationState(),
+            motionAnalysisState = MotionAnalysisState(
+                status = MotionStatus.STATIONARY,
+                filteredGyroscope = Vector3(0.001, -0.002, 0.001),
+                filteredLinearAcceleration = Vector3(0.01, -0.01, 0.02),
+                worldLinearAcceleration = Vector3(0.01, 0.02, 0.01),
+            ),
+            velocityState = VelocityState(
+                velocity = Vector3(0.12, 0.01, -0.03),
+                isAvailable = true,
+                isIntegrating = true,
+            ),
+            positionState = PositionState(
+                position = Vector3(0.42, 0.05, -0.18),
+                isAvailable = true,
+                isIntegrating = true,
+            ),
             onStartUdp = { _, _ -> },
             onStopUdp = {},
             onStartOrResumeTracking = {},
             onPauseTracking = {},
             onCenterOrientation = {},
+            onResetPosition = {},
             onStartCalibration = {},
         )
     }
