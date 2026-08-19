@@ -4,7 +4,6 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import com.example.myapplication.model.QuaternionData
-import com.example.myapplication.model.Vector3
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -25,26 +24,17 @@ internal class PhoneRenderer : GLSurfaceView.Renderer {
     private val modelViewMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
     private val sceneMvpMatrix = FloatArray(16)
-    private val rotationScaleMatrix = FloatArray(16)
-    private val translationMatrix = FloatArray(16)
 
     @Volatile
     private var quaternion = QuaternionData(w = 1.0, x = 0.0, y = 0.0, z = 0.0)
-
-    @Volatile
-    private var position = Vector3(x = 0.0, y = 0.0, z = 0.0)
 
     private var program = 0
     private var positionHandle = 0
     private var colorHandle = 0
     private var mvpMatrixHandle = 0
 
-    fun updatePose(
-        quaternion: QuaternionData,
-        position: Vector3,
-    ) {
+    fun updateQuaternion(quaternion: QuaternionData) {
         this.quaternion = quaternion
-        this.position = position
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -104,19 +94,8 @@ internal class PhoneRenderer : GLSurfaceView.Renderer {
         )
 
         val rotationMatrix = quaternion.toOpenGlRotationMatrix()
-        rotationMatrix.copyInto(rotationScaleMatrix)
-        Matrix.scaleM(rotationScaleMatrix, 0, PHONE_WIDTH, PHONE_HEIGHT, PHONE_DEPTH)
-
-        val translation = position.toSceneTranslation()
-        Matrix.setIdentityM(translationMatrix, 0)
-        Matrix.translateM(
-            translationMatrix,
-            0,
-            translation.x,
-            translation.y,
-            translation.z,
-        )
-        Matrix.multiplyMM(modelMatrix, 0, translationMatrix, 0, rotationScaleMatrix, 0)
+        rotationMatrix.copyInto(modelMatrix)
+        Matrix.scaleM(modelMatrix, 0, PHONE_WIDTH, PHONE_HEIGHT, PHONE_DEPTH)
         Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0)
         Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0)
 

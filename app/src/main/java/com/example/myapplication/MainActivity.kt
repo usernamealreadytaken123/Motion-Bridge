@@ -89,6 +89,13 @@ class MainActivity : ComponentActivity() {
                     linearAcceleration = sensorState.linearAcceleration,
                     timestampNanos = sensorState.timestampNanos,
                 )
+                calibrationController.updateAdaptiveBias(
+                    gyroscope = sensorState.gyroscope,
+                    linearAcceleration = sensorState.linearAcceleration,
+                    isStationary = motionAnalysisController.state.value.status ==
+                        MotionStatus.STATIONARY,
+                    timestampNanos = sensorState.timestampNanos,
+                )
                 val calibrationState = calibrationController.state.value
                 motionAnalysisController.update(
                     isCalibrated = calibrationState.status == CalibrationStatus.CALIBRATED,
@@ -110,9 +117,6 @@ class MainActivity : ComponentActivity() {
                     motionStatus = motionState.status,
                     velocityState = velocityEstimator.state.value,
                     timestampNanos = sensorState.timestampNanos,
-                )
-                orientationController.updateEstimatedPosition(
-                    positionEstimator.state.value.position,
                 )
             }
         }
@@ -141,18 +145,12 @@ class MainActivity : ComponentActivity() {
                     onCenterOrientation = orientationController::centerOrientation,
                     onResetPosition = {
                         positionEstimator.resetPosition()
-                        orientationController.resetDisplayPosition(
-                            positionEstimator.state.value.position,
-                        )
                     },
                     onStartCalibration = {
                         orientationController.pauseTracking()
                         motionAnalysisController.reset()
                         velocityEstimator.reset()
                         positionEstimator.reset()
-                        orientationController.resetDisplayPosition(
-                            positionEstimator.state.value.position,
-                        )
                         calibrationController.startCalibration()
                     },
                 )
@@ -171,7 +169,6 @@ class MainActivity : ComponentActivity() {
         calibrationController.cancelCalibration()
         velocityEstimator.reset()
         positionEstimator.reset()
-        orientationController.resetDisplayPosition(positionEstimator.state.value.position)
         sensorCollector.stop()
         super.onStop()
     }
@@ -439,7 +436,6 @@ private fun MotionSceneCard(state: OrientationTrackingState) {
         Column {
             PhoneScene(
                 quaternion = state.displayQuaternion,
-                position = state.displayPosition,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(320.dp),
@@ -456,7 +452,7 @@ private fun MotionSceneCard(state: OrientationTrackingState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Перемещение увеличено в 2 раза и ограничено границами сцены",
+                text = "Модель закреплена в центре и отображает только вращение",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -606,6 +602,16 @@ private fun SensorDataCard(
             )
             if (calibrationState.status == CalibrationStatus.CALIBRATED) {
                 SensorValue(
+                    title = "Bias гироскопа, рад/с",
+                    isAvailable = true,
+                    value = calibrationState.gyroscopeBias.formatted(),
+                )
+                SensorValue(
+                    title = "Шум гироскопа (σ), рад/с",
+                    isAvailable = true,
+                    value = calibrationState.gyroscopeNoise.formatted(),
+                )
+                SensorValue(
                     title = "Гироскоп после калибровки",
                     isAvailable = true,
                     value = calibrationState.correctedGyroscope?.formatted(),
@@ -617,6 +623,16 @@ private fun SensorDataCard(
                 value = state.linearAcceleration?.formatted(),
             )
             if (calibrationState.status == CalibrationStatus.CALIBRATED) {
+                SensorValue(
+                    title = "Bias ускорения, м/с²",
+                    isAvailable = true,
+                    value = calibrationState.linearAccelerationBias.formatted(),
+                )
+                SensorValue(
+                    title = "Шум ускорения (σ), м/с²",
+                    isAvailable = true,
+                    value = calibrationState.linearAccelerationNoise.formatted(),
+                )
                 SensorValue(
                     title = "Линейное ускорение после калибровки",
                     isAvailable = true,
@@ -635,7 +651,15 @@ private fun calibrationStatusText(state: CalibrationState): String = when (state
         "Не двигайте телефон: ${(state.progress * 100).toInt()}%"
 
     CalibrationStatus.CALIBRATED ->
-        "Завершена, использовано измерений: ${state.sampleCount}"
+        buildString {
+            append("Завершена, измерений: ${state.sampleCount}. ")
+            if (state.isAdaptiveBiasUpdating) {
+                append("Автоподстройка bias активна")
+            } else {
+                append("Автоподстройка ожидает покоя")
+            }
+            append(" (${state.adaptiveBiasUpdateCount})")
+        }
 
     CalibrationStatus.FAILED -> state.errorMessage ?: "Калибровка не выполнена"
 }
