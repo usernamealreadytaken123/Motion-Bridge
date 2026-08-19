@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -35,34 +36,71 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.example.myapplication.model.QuaternionData
 import com.example.myapplication.model.Vector3
 import com.example.myapplication.network.StreamingState
 import com.example.myapplication.network.TestPacketStreamer
+import com.example.myapplication.processing.CalibrationController
+import com.example.myapplication.processing.CalibrationState
+import com.example.myapplication.processing.CalibrationStatus
+import com.example.myapplication.processing.OrientationController
+import com.example.myapplication.processing.OrientationTrackingState
+import com.example.myapplication.processing.TrackingMode
 import com.example.myapplication.renderer.PhoneScene
 import com.example.myapplication.sensor.SensorAvailability
 import com.example.myapplication.sensor.SensorCollector
 import com.example.myapplication.sensor.SensorState
 import com.example.myapplication.ui.theme.MyApplicationTheme
 import java.util.Locale
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val streamer = TestPacketStreamer()
+    private val orientationController = OrientationController()
+    private val calibrationController = CalibrationController()
     private lateinit var sensorCollector: SensorCollector
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sensorCollector = SensorCollector(applicationContext)
+        lifecycleScope.launch {
+            sensorCollector.state.collect { sensorState ->
+                sensorState.quaternion?.let { quaternion ->
+                    orientationController.updateSensorQuaternion(
+                        quaternion = quaternion,
+                        timestampNanos = sensorState.timestampNanos,
+                    )
+                }
+                calibrationController.updateSensorSample(
+                    gyroscope = sensorState.gyroscope,
+                    linearAcceleration = sensorState.linearAcceleration,
+                    timestampNanos = sensorState.timestampNanos,
+                )
+            }
+        }
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
                 val streamingState by streamer.state.collectAsState()
                 val sensorState by sensorCollector.state.collectAsState()
+                val orientationState by orientationController.state.collectAsState()
+                val calibrationState by calibrationController.state.collectAsState()
                 MotionSenderScreen(
                     streamingState = streamingState,
                     sensorState = sensorState,
-                    onStart = streamer::start,
-                    onStop = streamer::stop,
+                    orientationState = orientationState,
+                    calibrationState = calibrationState,
+                    onStartUdp = streamer::start,
+                    onStopUdp = streamer::stop,
+                    onStartOrResumeTracking = orientationController::startOrResumeTracking,
+                    onPauseTracking = orientationController::pauseTracking,
+                    onCenterOrientation = orientationController::centerOrientation,
+                    onStartCalibration = {
+                        orientationController.pauseTracking()
+                        calibrationController.startCalibration()
+                    },
                 )
             }
         }
@@ -75,6 +113,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         streamer.stop()
+        orientationController.pauseTracking()
+        calibrationController.cancelCalibration()
         sensorCollector.stop()
         super.onStop()
     }
@@ -90,8 +130,14 @@ class MainActivity : ComponentActivity() {
 private fun MotionSenderScreen(
     streamingState: StreamingState,
     sensorState: SensorState,
-    onStart: (String, Int) -> Unit,
-    onStop: () -> Unit,
+    orientationState: OrientationTrackingState,
+    calibrationState: CalibrationState,
+    onStartUdp: (String, Int) -> Unit,
+    onStopUdp: () -> Unit,
+    onStartOrResumeTracking: () -> Unit,
+    onPauseTracking: () -> Unit,
+    onCenterOrientation: () -> Unit,
+    onStartCalibration: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var host by rememberSaveable { mutableStateOf("192.168.1.100") }
@@ -120,9 +166,25 @@ private fun MotionSenderScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            MotionSceneCard(sensorState.quaternion)
+            MotionSceneCard(orientationState)
 
-            SensorDataCard(sensorState)
+            MotionControlsCard(
+                state = orientationState,
+                calibrationState = calibrationState,
+                canCalibrate = sensorState.availability.gyroscope &&
+                    sensorState.availability.linearAcceleration &&
+                    sensorState.gyroscope != null &&
+                    sensorState.linearAcceleration != null,
+                onStartOrResumeTracking = onStartOrResumeTracking,
+                onPauseTracking = onPauseTracking,
+                onCenterOrientation = onCenterOrientation,
+                onStartCalibration = onStartCalibration,
+            )
+
+            SensorDataCard(
+                state = sensorState,
+                calibrationState = calibrationState,
+            )
 
             Text(
                 text = "UDP-передача",
@@ -166,14 +228,14 @@ private fun MotionSenderScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Button(
-                    onClick = { onStart(host.trim(), checkNotNull(port)) },
+                    onClick = { onStartUdp(host.trim(), checkNotNull(port)) },
                     modifier = Modifier.weight(1f),
                     enabled = !streamingState.isActive && endpointIsValid,
                 ) {
                     Text("Начать")
                 }
                 OutlinedButton(
-                    onClick = onStop,
+                    onClick = onStopUdp,
                     modifier = Modifier.weight(1f),
                     enabled = streamingState.isActive,
                 ) {
@@ -194,20 +256,21 @@ private fun MotionSenderScreen(
 }
 
 @Composable
-private fun MotionSceneCard(quaternion: QuaternionData?) {
+private fun MotionSceneCard(state: OrientationTrackingState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column {
             PhoneScene(
-                quaternion = quaternion,
+                quaternion = state.displayQuaternion,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(320.dp),
             )
             Text(
-                text = if (quaternion == null) {
-                    "3D-сцена ожидает данные rotation vector"
-                } else {
-                    "3D-сцена повторяет абсолютную ориентацию телефона"
+                text = when {
+                    state.sensorQuaternion == null -> "3D-сцена ожидает данные rotation vector"
+                    state.mode == TrackingMode.IDLE -> "Модель готова. Нажмите «Начать отслеживание»"
+                    state.mode == TrackingMode.TRACKING -> "Модель повторяет относительную ориентацию телефона"
+                    else -> "Модель зафиксирована"
                 },
                 modifier = Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodyMedium,
@@ -218,7 +281,112 @@ private fun MotionSceneCard(quaternion: QuaternionData?) {
 }
 
 @Composable
-private fun SensorDataCard(state: SensorState) {
+private fun MotionControlsCard(
+    state: OrientationTrackingState,
+    calibrationState: CalibrationState,
+    canCalibrate: Boolean,
+    onStartOrResumeTracking: () -> Unit,
+    onPauseTracking: () -> Unit,
+    onCenterOrientation: () -> Unit,
+    onStartCalibration: () -> Unit,
+) {
+    val trackingButtonText = when (state.mode) {
+        TrackingMode.IDLE -> "Начать отслеживание"
+        TrackingMode.TRACKING -> "Приостановить"
+        TrackingMode.PAUSED -> "Продолжить"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Управление ориентацией",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = when (state.mode) {
+                    TrackingMode.IDLE -> "Отслеживание ещё не запущено"
+                    TrackingMode.TRACKING -> "Отслеживание активно"
+                    TrackingMode.PAUSED -> "Отслеживание приостановлено"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = "Визуальное сглаживание: включено",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Button(
+                onClick = {
+                    if (state.mode == TrackingMode.TRACKING) {
+                        onPauseTracking()
+                    } else {
+                        onStartOrResumeTracking()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = state.sensorQuaternion != null,
+            ) {
+                Text(trackingButtonText)
+            }
+            OutlinedButton(
+                onClick = onCenterOrientation,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = state.sensorQuaternion != null,
+            ) {
+                Text("Центрировать ориентацию")
+            }
+            Text(
+                text = "Калибровка датчиков",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = calibrationStatusText(calibrationState),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (calibrationState.status == CalibrationStatus.FAILED) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                },
+            )
+            if (calibrationState.status == CalibrationStatus.CALIBRATING) {
+                LinearProgressIndicator(
+                    progress = { calibrationState.progress },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            OutlinedButton(
+                onClick = onStartCalibration,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = canCalibrate &&
+                    calibrationState.status != CalibrationStatus.CALIBRATING,
+            ) {
+                Text(
+                    if (calibrationState.status == CalibrationStatus.CALIBRATED) {
+                        "Повторить калибровку"
+                    } else {
+                        "Калибровка"
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SensorDataCard(
+    state: SensorState,
+    calibrationState: CalibrationState,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -244,13 +412,40 @@ private fun SensorDataCard(state: SensorState) {
                 isAvailable = state.availability.gyroscope,
                 value = state.gyroscope?.formatted(),
             )
+            if (calibrationState.status == CalibrationStatus.CALIBRATED) {
+                SensorValue(
+                    title = "Гироскоп после калибровки",
+                    isAvailable = true,
+                    value = calibrationState.correctedGyroscope?.formatted(),
+                )
+            }
             SensorValue(
                 title = "Линейное ускорение, м/с²",
                 isAvailable = state.availability.linearAcceleration,
                 value = state.linearAcceleration?.formatted(),
             )
+            if (calibrationState.status == CalibrationStatus.CALIBRATED) {
+                SensorValue(
+                    title = "Линейное ускорение после калибровки",
+                    isAvailable = true,
+                    value = calibrationState.correctedLinearAcceleration?.formatted(),
+                )
+            }
         }
     }
+}
+
+private fun calibrationStatusText(state: CalibrationState): String = when (state.status) {
+    CalibrationStatus.NOT_CALIBRATED ->
+        "Не выполнена. Положите телефон неподвижно перед запуском."
+
+    CalibrationStatus.CALIBRATING ->
+        "Не двигайте телефон: ${(state.progress * 100).toInt()}%"
+
+    CalibrationStatus.CALIBRATED ->
+        "Завершена, использовано измерений: ${state.sampleCount}"
+
+    CalibrationStatus.FAILED -> state.errorMessage ?: "Калибровка не выполнена"
 }
 
 @Composable
@@ -348,8 +543,16 @@ private fun MotionSenderScreenPreview() {
                 gyroscope = Vector3(0.01, 0.24, -0.12),
                 linearAcceleration = Vector3(0.15, -0.04, 0.82),
             ),
-            onStart = { _, _ -> },
-            onStop = {},
+            orientationState = OrientationTrackingState(
+                sensorQuaternion = QuaternionData(1.0, 0.0, 0.0, 0.0),
+            ),
+            calibrationState = CalibrationState(),
+            onStartUdp = { _, _ -> },
+            onStopUdp = {},
+            onStartOrResumeTracking = {},
+            onPauseTracking = {},
+            onCenterOrientation = {},
+            onStartCalibration = {},
         )
     }
 }

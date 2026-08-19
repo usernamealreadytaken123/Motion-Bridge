@@ -26,12 +26,6 @@ internal class PhoneRenderer : GLSurfaceView.Renderer {
     private val modelMatrix = FloatArray(16)
     private val modelViewMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
-    private val androidWorldToOpenGlMatrix = floatArrayOf(
-        1f, 0f, 0f, 0f,
-        0f, 0f, -1f, 0f,
-        0f, 1f, 0f, 0f,
-        0f, 0f, 0f, 1f,
-    )
 
     @Volatile
     private var quaternion = QuaternionData(w = 1.0, x = 0.0, y = 0.0, z = 0.0)
@@ -86,14 +80,7 @@ internal class PhoneRenderer : GLSurfaceView.Renderer {
         GLES20.glUseProgram(program)
 
         val rotationMatrix = quaternion.toOpenGlRotationMatrix()
-        Matrix.multiplyMM(
-            modelMatrix,
-            0,
-            androidWorldToOpenGlMatrix,
-            0,
-            rotationMatrix,
-            0,
-        )
+        rotationMatrix.copyInto(modelMatrix)
         Matrix.scaleM(modelMatrix, 0, PHONE_WIDTH, PHONE_HEIGHT, PHONE_DEPTH)
         Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0)
         Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0)
