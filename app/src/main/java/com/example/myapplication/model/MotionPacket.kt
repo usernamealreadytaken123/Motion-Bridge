@@ -1,6 +1,8 @@
 package com.example.myapplication.model
 
 import java.util.Locale
+import java.util.UUID
+import com.example.myapplication.vision.PlanarOdometryState
 
 data class Vector3(
     val x: Double,
@@ -21,10 +23,18 @@ data class MotionPacket(
     val quaternion: QuaternionData,
     val gyroscope: Vector3,
     val linearAcceleration: Vector3,
+    val heightAboveSurfaceMeters: Double =
+        TrackingConfiguration.FIXED_HEIGHT_ABOVE_SURFACE_METERS,
+    val sessionId: UUID,
+    val deviceTimestampNanos: Long,
+    val quaternionTimestampNanos: Long,
+    val gyroscopeTimestampNanos: Long,
+    val accelerationTimestampNanos: Long,
+    val planarOdometry: PlanarOdometryState? = null,
 ) {
     fun toJson(): String = String.format(
         Locale.US,
-        """{"sequence":%d,"timestamp":%.3f,"quaternion":{"w":%.4f,"x":%.4f,"y":%.4f,"z":%.4f},"gyroscope":{"x":%.4f,"y":%.4f,"z":%.4f},"linear_acceleration":{"x":%.4f,"y":%.4f,"z":%.4f}}""",
+        """{"sequence":%d,"timestamp":%.3f,"quaternion":{"w":%.4f,"x":%.4f,"y":%.4f,"z":%.4f},"gyroscope":{"x":%.4f,"y":%.4f,"z":%.4f},"linear_acceleration":{"x":%.4f,"y":%.4f,"z":%.4f},"height_above_surface_m":%.3f,"protocol_version":2,"packet_type":"telemetry","session_id":"%s","device_timestamp_ns":%d,"sensor_timestamps_ns":{"quaternion":%d,"gyroscope":%d,"linear_acceleration":%d},"planar_odometry":%s}""",
         sequence,
         timestamp,
         quaternion.w,
@@ -37,28 +47,33 @@ data class MotionPacket(
         linearAcceleration.x,
         linearAcceleration.y,
         linearAcceleration.z,
+        heightAboveSurfaceMeters,
+        sessionId,
+        deviceTimestampNanos,
+        quaternionTimestampNanos,
+        gyroscopeTimestampNanos,
+        accelerationTimestampNanos,
+        planarOdometry?.toTelemetryJson() ?: "null",
     )
-
-    companion object {
-        fun testPacket(sequence: Long, timestamp: Double) = MotionPacket(
-            sequence = sequence,
-            timestamp = timestamp,
-            quaternion = QuaternionData(
-                w = 0.9238,
-                x = 0.1021,
-                y = 0.3015,
-                z = 0.2057,
-            ),
-            gyroscope = Vector3(
-                x = 0.01,
-                y = 0.24,
-                z = -0.12,
-            ),
-            linearAcceleration = Vector3(
-                x = 0.15,
-                y = -0.04,
-                z = 0.82,
-            ),
-        )
-    }
 }
+
+/** Absolute position repeats at 50 Hz; delta is per camera frame, not per UDP packet. */
+private fun PlanarOdometryState.toTelemetryJson(): String = String.format(
+    Locale.US,
+    """{"epoch":%d,"timestamp_ns":%d,"status":"%s","camera_active":%s,"x_m":%.4f,"y_m":%.4f,"heading_rad":%.5f,"delta_x_m":%.5f,"delta_y_m":%.5f,"surface_distance_m":%.3f,"tracked_points":%d,"inliers":%d,"inlier_ratio":%.4f,"image_scale":%.5f,"intrinsics_approximate":%s}""",
+    trackingEpoch,
+    timestampNanos,
+    status.name,
+    isCameraActive,
+    xMetres,
+    yMetres,
+    headingRadians,
+    lastDeltaXMetres,
+    lastDeltaYMetres,
+    surfaceDistanceMetres,
+    trackedPoints,
+    inliers,
+    inlierRatio,
+    imageScale,
+    intrinsicsAreApproximate,
+)

@@ -25,6 +25,9 @@ data class SensorState(
     val gyroscope: Vector3? = null,
     val linearAcceleration: Vector3? = null,
     val timestampNanos: Long = 0L,
+    val quaternionTimestampNanos: Long = 0L,
+    val gyroscopeTimestampNanos: Long = 0L,
+    val accelerationTimestampNanos: Long = 0L,
 )
 
 class SensorCollector(context: Context) : SensorEventListener, Closeable {
@@ -49,6 +52,9 @@ class SensorCollector(context: Context) : SensorEventListener, Closeable {
     private var latestLinearAcceleration: Vector3? = null
     private var latestTimestampNanos = 0L
     private var lastPublishedAtNanos = 0L
+    private var quaternionTimestampNanos = 0L
+    private var gyroscopeTimestampNanos = 0L
+    private var accelerationTimestampNanos = 0L
 
     @Synchronized
     fun start() {
@@ -93,14 +99,17 @@ class SensorCollector(context: Context) : SensorEventListener, Closeable {
                         y = quaternion[2].toDouble(),
                         z = quaternion[3].toDouble(),
                     )
+                    quaternionTimestampNanos = event.timestamp
                 }
 
                 Sensor.TYPE_GYROSCOPE -> {
                     latestGyroscope = event.values.toVector3()
+                    gyroscopeTimestampNanos = event.timestamp
                 }
 
                 Sensor.TYPE_LINEAR_ACCELERATION -> {
                     latestLinearAcceleration = event.values.toVector3()
+                    accelerationTimestampNanos = event.timestamp
                 }
             }
 
@@ -129,6 +138,9 @@ class SensorCollector(context: Context) : SensorEventListener, Closeable {
             gyroscope = latestGyroscope,
             linearAcceleration = latestLinearAcceleration,
             timestampNanos = latestTimestampNanos,
+            quaternionTimestampNanos = quaternionTimestampNanos,
+            gyroscopeTimestampNanos = gyroscopeTimestampNanos,
+            accelerationTimestampNanos = accelerationTimestampNanos,
         )
     }
 

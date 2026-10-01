@@ -1,6 +1,9 @@
 package com.example.myapplication
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -38,6 +41,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.example.myapplication.model.QuaternionData
+import com.example.myapplication.model.TrackingConfiguration
 import com.example.myapplication.model.Vector3
 import com.example.myapplication.network.StreamingState
 import com.example.myapplication.network.TestPacketStreamer
@@ -59,13 +63,39 @@ import com.example.myapplication.sensor.SensorAvailability
 import com.example.myapplication.sensor.SensorCollector
 import com.example.myapplication.sensor.SensorState
 import com.example.myapplication.ui.theme.MyApplicationTheme
+import com.example.myapplication.vision.CameraOdometryCard
+import com.example.myapplication.vision.CameraOdometryController
+import com.example.myapplication.vision.PlanarOdometryState
 import java.util.Locale
 import kotlin.math.sqrt
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private val streamer = TestPacketStreamer()
+    private lateinit var streamer: TestPacketStreamer
+    private lateinit var cameraOdometryController: CameraOdometryController
+    private val cameraPermissionGranted = mutableStateOf(false)
+    private var pendingUdpEndpoint: Pair<String, Int>? = null
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { isGranted ->
+        cameraPermissionGranted.value = isGranted
+        if (!isGranted && ::cameraOdometryController.isInitialized) {
+            cameraOdometryController.reportPermissionDenied()
+        }
+    }
+    private val localNetworkPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { isGranted ->
+        val endpoint = pendingUdpEndpoint
+        pendingUdpEndpoint = null
+
+        if (isGranted && endpoint != null) {
+            streamer.start(endpoint.first, endpoint.second)
+        } else if (::streamer.isInitialized) {
+            streamer.showError("Нет разрешения на доступ к локальной сети")
+        }
+    }
     private val orientationController = OrientationController()
     private val calibrationController = CalibrationController()
     private val motionAnalysisController = MotionAnalysisController()
@@ -75,7 +105,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        cameraPermissionGranted.value =
+            checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        cameraOdometryController = CameraOdometryController(applicationContext)
         sensorCollector = SensorCollector(applicationContext)
+        streamer = TestPacketStreamer(
+            context = applicationContext,
+            sensorStateProvider = { sensorCollector.state.value },
+            planarOdometryStateProvider = { cameraOdometryController.state.value },
+        )
         lifecycleScope.launch {
             sensorCollector.state.collect { sensorState ->
                 sensorState.quaternion?.let { quaternion ->
@@ -130,6 +168,7 @@ class MainActivity : ComponentActivity() {
                 val motionAnalysisState by motionAnalysisController.state.collectAsState()
                 val velocityState by velocityEstimator.state.collectAsState()
                 val positionState by positionEstimator.state.collectAsState()
+                val planarOdometryState by cameraOdometryController.state.collectAsState()
                 MotionSenderScreen(
                     streamingState = streamingState,
                     sensorState = sensorState,
@@ -138,7 +177,13 @@ class MainActivity : ComponentActivity() {
                     motionAnalysisState = motionAnalysisState,
                     velocityState = velocityState,
                     positionState = positionState,
-                    onStartUdp = streamer::start,
+                    planarOdometryState = planarOdometryState,
+                    cameraOdometryController = cameraOdometryController,
+                    cameraPermissionGranted = cameraPermissionGranted.value,
+                    onRequestCameraPermission = {
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    },
+                    onStartUdp = ::startUdp,
                     onStopUdp = streamer::stop,
                     onStartOrResumeTracking = orientationController::startOrResumeTracking,
                     onPauseTracking = orientationController::pauseTracking,
@@ -175,8 +220,27 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         streamer.close()
+        cameraOdometryController.close()
         sensorCollector.close()
         super.onDestroy()
+    }
+
+    private fun startUdp(host: String, port: Int) {
+        if (
+            android.os.Build.VERSION.SDK_INT >= ANDROID_17_API_LEVEL &&
+            checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingUdpEndpoint = host to port
+            localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+            return
+        }
+
+        streamer.start(host, port)
+    }
+
+    private companion object {
+        const val ANDROID_17_API_LEVEL = 37
     }
 }
 
@@ -189,6 +253,10 @@ private fun MotionSenderScreen(
     motionAnalysisState: MotionAnalysisState,
     velocityState: VelocityState,
     positionState: PositionState,
+    planarOdometryState: PlanarOdometryState,
+    cameraOdometryController: CameraOdometryController?,
+    cameraPermissionGranted: Boolean,
+    onRequestCameraPermission: () -> Unit,
     onStartUdp: (String, Int) -> Unit,
     onStopUdp: () -> Unit,
     onStartOrResumeTracking: () -> Unit,
@@ -219,7 +287,7 @@ private fun MotionSenderScreen(
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Живые данные датчиков телефона и тестовая UDP-передача 50 Гц.",
+                text = "Живые данные датчиков телефона и UDP-передача 50 Гц.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -246,9 +314,20 @@ private fun MotionSenderScreen(
                 onResetPosition = onResetPosition,
             )
 
+            CameraOdometryCard(
+                controller = cameraOdometryController,
+                state = planarOdometryState,
+                cameraPermissionGranted = cameraPermissionGranted,
+                onRequestCameraPermission = onRequestCameraPermission,
+            )
+
             SensorDataCard(
                 state = sensorState,
                 calibrationState = calibrationState,
+            )
+
+            FixedHeightCard(
+                heightMeters = TrackingConfiguration.FIXED_HEIGHT_ABOVE_SURFACE_METERS,
             )
 
             Text(
@@ -312,7 +391,7 @@ private fun MotionSenderScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Показания сверху уже реальные. UDP пока отправляет фиксированные тестовые значения — подключим к датчикам отдельным шагом.",
+                text = "UDP v2: ориентация, гироскоп, линейное ускорение и камерная 2D-одометрия с временными метками.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -405,9 +484,9 @@ private fun MotionAnalysisCard(
                 )
                 Text(
                     text = if (positionState.isIntegrating) {
-                        "Интегрирование позиции активно"
+                        "Интегрирование X/Z активно; Y зафиксирована на 1 м"
                     } else {
-                        "Позиция сохранена"
+                        "Позиция X/Z сохранена; Y зафиксирована на 1 м"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -643,6 +722,35 @@ private fun SensorDataCard(
     }
 }
 
+@Composable
+private fun FixedHeightCard(
+    heightMeters: Double,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Высота над поверхностью",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Y = ${heightMeters.formatValue()} м",
+                style = MaterialTheme.typography.headlineSmall,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Значение задано константой и не зависит от датчиков телефона.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 private fun calibrationStatusText(state: CalibrationState): String = when (state.status) {
     CalibrationStatus.NOT_CALIBRATED ->
         "Не выполнена. Положите телефон неподвижно перед запуском."
@@ -783,6 +891,10 @@ private fun MotionSenderScreenPreview() {
                 isAvailable = true,
                 isIntegrating = true,
             ),
+            planarOdometryState = PlanarOdometryState(),
+            cameraOdometryController = null,
+            cameraPermissionGranted = false,
+            onRequestCameraPermission = {},
             onStartUdp = { _, _ -> },
             onStopUdp = {},
             onStartOrResumeTracking = {},

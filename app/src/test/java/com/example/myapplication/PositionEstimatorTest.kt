@@ -77,7 +77,7 @@ class PositionEstimatorTest {
 
         estimator.resetPosition()
 
-        assertVectorEquals(Vector3(0.0, 0.0, 0.0), estimator.state.value.position)
+        assertVectorEquals(Vector3(0.0, 1.0, 0.0), estimator.state.value.position)
         assertTrue(estimator.state.value.isAvailable)
     }
 
@@ -97,8 +97,24 @@ class PositionEstimatorTest {
             timestampNanos = 2_000_000_000L,
         )
 
-        assertVectorEquals(Vector3(0.0, 0.0, 0.0), estimator.state.value.position)
+        assertVectorEquals(Vector3(0.0, 1.0, 0.0), estimator.state.value.position)
         assertFalse(estimator.state.value.isIntegrating)
+    }
+
+    @Test
+    fun verticalVelocityDoesNotChangeFixedHeight() {
+        val estimator = PositionEstimator()
+
+        repeat(51) { index ->
+            estimator.update(
+                isCalibrated = true,
+                motionStatus = MotionStatus.MOVING,
+                velocityState = movingVelocity(Vector3(0.0, 2.0, 0.0)),
+                timestampNanos = 1_000_000_000L + index * 20_000_000L,
+            )
+        }
+
+        assertEquals(1.0, estimator.state.value.position.y, 0.000001)
     }
 
     private fun movingVelocity(value: Vector3) = VelocityState(

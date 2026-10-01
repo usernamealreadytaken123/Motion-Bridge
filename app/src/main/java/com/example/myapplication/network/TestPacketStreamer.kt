@@ -1,8 +1,13 @@
 package com.example.myapplication.network
 
+import android.content.Context
 import android.os.SystemClock
 import com.example.myapplication.model.MotionPacket
+import com.example.myapplication.model.TrackingConfiguration
+import com.example.myapplication.sensor.SensorState
+import com.example.myapplication.vision.PlanarOdometryState
 import java.io.Closeable
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +30,11 @@ data class StreamingState(
     val error: String? = null,
 )
 
-class TestPacketStreamer : Closeable {
+class TestPacketStreamer(
+    private val context: Context,
+    private val sensorStateProvider: () -> SensorState,
+    private val planarOdometryStateProvider: () -> PlanarOdometryState,
+) : Closeable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sessionCounter = AtomicLong(0)
     private var streamingJob: Job? = null
@@ -38,6 +47,7 @@ class TestPacketStreamer : Closeable {
         if (streamingJob?.isActive == true) return
 
         val session = sessionCounter.incrementAndGet()
+        val sessionId = UUID.randomUUID()
         _state.value = StreamingState(
             isActive = true,
             status = "Подготовка передачи…",
@@ -45,9 +55,9 @@ class TestPacketStreamer : Closeable {
 
         streamingJob = scope.launch {
             try {
-                UdpSender(host, port).use { sender ->
+                UdpSender(context, host, port).use { sender ->
                     updateState(session) {
-                        it.copy(status = "Отправка на $host:$port")
+                        it.copy(status = "Ожидание данных датчиков…")
                     }
 
                     var sequence = 0L
@@ -65,14 +75,44 @@ class TestPacketStreamer : Closeable {
                             nextSendAt = now
                         }
 
-                        val timestamp = System.currentTimeMillis() / 1_000.0
-                        sender.send(MotionPacket.testPacket(sequence, timestamp).toJson())
+                        val sensorState = sensorStateProvider()
+                        val quaternion = sensorState.quaternion
+                        val gyroscope = sensorState.gyroscope
+                        val linearAcceleration = sensorState.linearAcceleration
+                        val planarState = planarOdometryStateProvider()
+
+                        if (
+                            quaternion == null ||
+                            gyroscope == null ||
+                            linearAcceleration == null
+                        ) {
+                            nextSendAt += SEND_PERIOD_NANOS
+                            continue
+                        }
+
+                        val packet = MotionPacket(
+                            sequence = sequence,
+                            timestamp = System.currentTimeMillis() / 1_000.0,
+                            quaternion = quaternion,
+                            gyroscope = gyroscope,
+                            linearAcceleration = linearAcceleration,
+                            heightAboveSurfaceMeters =
+                                TrackingConfiguration.FIXED_HEIGHT_ABOVE_SURFACE_METERS,
+                            sessionId = sessionId,
+                            deviceTimestampNanos = SystemClock.elapsedRealtimeNanos(),
+                            quaternionTimestampNanos = sensorState.quaternionTimestampNanos,
+                            gyroscopeTimestampNanos = sensorState.gyroscopeTimestampNanos,
+                            accelerationTimestampNanos = sensorState.accelerationTimestampNanos,
+                            planarOdometry = planarState.takeIf { it.trackingEpoch > 0L },
+                        )
+                        sender.send(packet.toJson())
                         sentPackets += 1
 
                         if (sentPackets == 1L || sentPackets % UI_UPDATE_EVERY_PACKETS == 0L) {
                             val lastSentSequence = sequence
                             updateState(session) {
                                 it.copy(
+                                    status = "Отправка датчиков по Wi-Fi на $host:$port",
                                     sentPackets = sentPackets,
                                     lastSequence = lastSentSequence,
                                     error = null,
@@ -111,6 +151,15 @@ class TestPacketStreamer : Closeable {
         _state.value = _state.value.copy(
             isActive = false,
             status = "Передача остановлена",
+        )
+    }
+
+    @Synchronized
+    fun showError(message: String) {
+        stop()
+        _state.value = StreamingState(
+            status = "Ошибка передачи",
+            error = message,
         )
     }
 

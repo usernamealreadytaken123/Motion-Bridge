@@ -1,6 +1,7 @@
 package com.example.myapplication.processing
 
 import com.example.myapplication.model.Vector3
+import com.example.myapplication.model.TrackingConfiguration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -99,7 +100,13 @@ class PositionEstimator {
 
         val deltaSeconds = elapsedNanos / NANOS_PER_SECOND
         val averageVelocity = (previous + velocity) / 2.0
-        val position = _state.value.position + averageVelocity * deltaSeconds
+        val displacement = averageVelocity * deltaSeconds
+        val currentPosition = _state.value.position
+        val position = Vector3(
+            x = currentPosition.x + displacement.x,
+            y = TrackingConfiguration.FIXED_HEIGHT_ABOVE_SURFACE_METERS,
+            z = currentPosition.z + displacement.z,
+        )
 
         previousVelocity = velocity
         lastTimestampNanos = timestampNanos
@@ -135,4 +142,8 @@ class PositionEstimator {
     }
 }
 
-private val ZERO_POSITION = Vector3(x = 0.0, y = 0.0, z = 0.0)
+private val ZERO_POSITION = Vector3(
+    x = 0.0,
+    y = TrackingConfiguration.FIXED_HEIGHT_ABOVE_SURFACE_METERS,
+    z = 0.0,
+)
