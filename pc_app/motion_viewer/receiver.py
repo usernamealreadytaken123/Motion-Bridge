@@ -10,33 +10,16 @@ from .recording import SessionRecorder
 from .statistics import StreamStats
 
 
-class TelemetryReceiver:
-    def __init__(self, host: str = "0.0.0.0", port: int = 5005,
-                 recorder: SessionRecorder | None = None):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1_048_576)
-            self.socket.bind((host, port))
-            self.socket.settimeout(0.1)
-        except OSError:
-            self.socket.close()
-            raise
-        self.address = self.socket.getsockname()
+class TelemetryState:
+    """Packet processing shared by live UDP and offline replay; does not open sockets."""
+
+    def __init__(self, recorder: SessionRecorder | None = None):
         self.recorder = recorder
         self.streams: OrderedDict[tuple[str, int, str | None], StreamStats] = OrderedDict()
         self.datagrams = 0
         self.invalid = 0
         self.last_error: str | None = None
         self.evicted_streams = 0
-
-    def receive_once(self) -> dict | None:
-        if self.recorder:
-            self.recorder.check()
-        try:
-            data, sender = self.socket.recvfrom(65_535)
-        except socket.timeout:
-            return None
-        return self.process(data, sender, time.monotonic_ns(), time.time_ns())
 
     def process(self, data: bytes, sender: tuple[str, int], received_ns: int,
                 received_unix_ns: int) -> dict:
@@ -94,6 +77,29 @@ class TelemetryReceiver:
             "evicted_streams": self.evicted_streams,
             "streams": streams,
         }
+
+class TelemetryReceiver(TelemetryState):
+    def __init__(self, host: str = "0.0.0.0", port: int = 5005,
+                 recorder: SessionRecorder | None = None):
+        super().__init__(recorder)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1_048_576)
+            self.socket.bind((host, port))
+            self.socket.settimeout(0.1)
+        except OSError:
+            self.socket.close()
+            raise
+        self.address = self.socket.getsockname()
+
+    def receive_once(self) -> dict | None:
+        if self.recorder:
+            self.recorder.check()
+        try:
+            data, sender = self.socket.recvfrom(65_535)
+        except socket.timeout:
+            return None
+        return self.process(data, sender, time.monotonic_ns(), time.time_ns())
 
     def close(self) -> None:
         self.socket.close()

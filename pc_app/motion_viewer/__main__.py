@@ -1,4 +1,4 @@
-"""Stage 1 command-line monitor. Run from the project root: python -m pc_app.motion_viewer."""
+"""Run from the project root: python -m pc_app.motion_viewer [gui|listen|simulate|inspect]."""
 
 import argparse
 import base64
@@ -106,6 +106,8 @@ def _simulate(args: argparse.Namespace) -> int:
     session = f"sim-{uuid.uuid4()}"
     total = max(1, int(args.duration * args.rate))
     started = time.monotonic()
+    device_started_ns = time.monotonic_ns()
+    previous_stamp = device_started_ns - 1
     sent = 0
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         for sequence in range(total):
@@ -114,13 +116,16 @@ def _simulate(args: argparse.Namespace) -> int:
                 time.sleep(delay)
             if args.drop_every and (sequence + 1) % args.drop_every == 0:
                 continue
-            stamp = time.monotonic_ns()
+            # Model a sensor clock, not send scheduling jitter. Windows monotonic_ns may be
+            # coarse, and catch-up datagrams must not look like repeated camera frames.
+            stamp = max(previous_stamp + 1, device_started_ns + round(sequence * 1e9 / args.rate))
+            previous_stamp = stamp
             angle = sequence / args.rate * 0.2
             previous_angle = max(0, sequence - 1) / args.rate * 0.2
             packet = {
                 "sequence": sequence, "timestamp": time.time(),
-                "quaternion": {"w": 1, "x": 0, "y": 0, "z": 0},
-                "gyroscope": {"x": 0, "y": 0, "z": 0},
+                "quaternion": {"w": math.cos(angle / 2), "x": 0, "y": 0, "z": math.sin(angle / 2)},
+                "gyroscope": {"x": 0, "y": 0, "z": 0.2},
                 "linear_acceleration": {"x": 0, "y": 0, "z": 0},
                 "height_above_surface_m": 1,
                 "protocol_version": 2, "packet_type": "telemetry", "session_id": session,
@@ -177,9 +182,24 @@ def _inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _gui(args: argparse.Namespace) -> int:
+    try:
+        from .gui import run_gui
+    except ModuleNotFoundError as exc:
+        raise ValueError(
+            "GUI dependencies are missing. Install with: "
+            "python -m pip install -r pc_app/requirements-gui.txt"
+        ) from exc
+    return run_gui(args.host, args.port)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Android Motion Viewer — transport stage")
+    parser = argparse.ArgumentParser(description="Android Motion Viewer")
     commands = parser.add_subparsers(dest="command", required=True)
+    gui = commands.add_parser("gui", help="Open the desktop viewer (requires requirements-gui.txt)")
+    gui.add_argument("--host", default=None)
+    gui.add_argument("--port", type=_port, default=None)
+    gui.set_defaults(run=_gui)
     listen = commands.add_parser("listen", help="Receive Android UDP telemetry")
     listen.add_argument("--host", default="0.0.0.0")
     listen.add_argument("--port", type=_port, default=5005)
