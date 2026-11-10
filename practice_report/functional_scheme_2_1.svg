@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1190" viewBox="0 0 1800 1190">
+<rect width="100%" height="100%" fill="white"/>
+<text x="900" y="48" font-family="Times New Roman,serif" font-size="38" font-weight="bold" text-anchor="middle" dominant-baseline="middle">Функциональная схема программного комплекса</text>
+<polyline points="30,280 710,280 710,1110 30,1110 30,280" fill="none" stroke="black" stroke-width="2"/>
+<polyline points="780,280 1770,280 1770,1110 780,1110 780,280" fill="none" stroke="black" stroke-width="2"/>
+<text x="370" y="310" font-family="Times New Roman,serif" font-size="29" font-weight="bold" text-anchor="middle" dominant-baseline="middle">Устройство с камерой и датчиками</text>
+<text x="1275" y="310" font-family="Times New Roman,serif" font-size="30" font-weight="bold" text-anchor="middle" dominant-baseline="middle">Персональный компьютер</text>
+<polyline points="410,130 680,130 680,240 410,240 410,130" fill="none" stroke="black" stroke-width="2" stroke-dasharray="11 9"/>
+<text x="545.0" y="167.5" font-family="Times New Roman,serif" font-size="25" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Источник высоты</text>
+<text x="545.0" y="202.5" font-family="Times New Roman,serif" font-size="25" font-weight="normal" text-anchor="middle" dominant-baseline="middle">LiDAR (опционально)</text>
+<polyline points="1290,130 1680,130 1680,240 1290,240 1290,130" fill="none" stroke="black" stroke-width="2"/>
+<text x="1485.0" y="185.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Видеозапись MP4</text>
+<polyline points="80,350 320,350 320,460 80,460 80,350" fill="none" stroke="black" stroke-width="2"/>
+<text x="200.0" y="370.0" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Камера</text>
+<text x="200.0" y="405.0" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Последовательность</text>
+<text x="200.0" y="440.0" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">кадров</text>
+<polyline points="390,350 650,350 650,460 390,460 390,350" fill="none" stroke="black" stroke-width="2"/>
+<text x="520.0" y="370.0" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Датчики:</text>
+<text x="520.0" y="405.0" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">ориентация, гироскоп,</text>
+<text x="520.0" y="440.0" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">линейное ускорение</text>
+<polyline points="190,540 550,540 550,660 190,660 190,540" fill="none" stroke="black" stroke-width="2"/>
+<text x="370.0" y="582.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Сбор исходных данных</text>
+<text x="370.0" y="617.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Привязка ко времени</text>
+<polyline points="80,730 340,730 340,860 80,860 80,730" fill="none" stroke="black" stroke-width="2"/>
+<text x="210.0" y="760.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Локальная оценка</text>
+<text x="210.0" y="795.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">ориентации и</text>
+<text x="210.0" y="830.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">перемещения X, Y</text>
+<polyline points="390,730 650,730 650,860 390,860 390,730" fill="none" stroke="black" stroke-width="2"/>
+<text x="520.0" y="777.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Передача кадров</text>
+<text x="520.0" y="812.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">и данных датчиков</text>
+<polyline points="820,730 1150,730 1150,860 820,860 820,730" fill="none" stroke="black" stroke-width="2"/>
+<text x="985.0" y="760.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Приём исходных данных</text>
+<text x="985.0" y="795.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Расчёт одометрии на ПК</text>
+<text x="985.0" y="830.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">с учётом ориентации</text>
+<polyline points="820,960 1150,960 1150,1060 820,1060 820,960" fill="none" stroke="black" stroke-width="2"/>
+<text x="985.0" y="992.5" font-family="Times New Roman,serif" font-size="25" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Приём готовых результатов</text>
+<text x="985.0" y="1027.5" font-family="Times New Roman,serif" font-size="25" font-weight="normal" text-anchor="middle" dominant-baseline="middle">и телеметрии</text>
+<polyline points="1290,350 1680,350 1680,490 1290,490 1290,350" fill="none" stroke="black" stroke-width="2"/>
+<text x="1485.0" y="385.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Загрузка и декодирование MP4</text>
+<text x="1485.0" y="420.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Оценка плоского перемещения</text>
+<text x="1485.0" y="455.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">без компенсации наклона</text>
+<polyline points="1270,730 1700,730 1700,1060 1270,1060 1270,730" fill="none" stroke="black" stroke-width="2"/>
+<text x="1485.0" y="790.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Отображение и хранение:</text>
+<text x="1485.0" y="825.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">координаты и 2D-траектория;</text>
+<text x="1485.0" y="860.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">3D-ориентация и графики*;</text>
+<text x="1485.0" y="895.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">запись данных и результатов;</text>
+<text x="1485.0" y="930.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">просмотр и повторный анализ</text>
+<text x="1485.0" y="965.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle"></text>
+<text x="1485.0" y="1000.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">* при наличии нужных данных</text>
+<polyline points="200,460 200,500 290,500 290,540" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="290,540 283.0,525.0 297.0,525.0" fill="black"/>
+<polyline points="520,460 520,500 450,500 450,540" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="450,540 443.0,525.0 457.0,525.0" fill="black"/>
+<polyline points="680,185 695,185 695,600 550,600" fill="none" stroke="black" stroke-width="2" stroke-dasharray="11 9"/>
+<polygon points="550,600 565.0,593.0 565.0,607.0" fill="black"/>
+<polyline points="370,660 370,690" fill="none" stroke="black" stroke-width="2"/>
+<polyline points="370,690 210,690 210,730" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="210,730 203.0,715.0 217.0,715.0" fill="black"/>
+<polyline points="370,690 520,690 520,730" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="520,730 513.0,715.0 527.0,715.0" fill="black"/>
+<circle cx="370" cy="690" r="3" fill="black"/>
+<polyline points="650,795 820,795" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="820,795 805.0,802.0 805.0,788.0" fill="black"/>
+<rect x="711.0" y="764.0" width="48.0" height="20.0" fill="white"/>
+<text x="735" y="774" font-family="Times New Roman,serif" font-size="22" font-weight="normal" text-anchor="middle" dominant-baseline="middle">TCP</text>
+<polyline points="210,860 210,1010 820,1010" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="820,1010 805.0,1017.0 805.0,1003.0" fill="black"/>
+<rect x="719.0" y="979.0" width="52.0" height="20.0" fill="white"/>
+<text x="745" y="989" font-family="Times New Roman,serif" font-size="22" font-weight="normal" text-anchor="middle" dominant-baseline="middle">UDP</text>
+<polyline points="1150,795 1270,795" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1270,795 1255.0,802.0 1255.0,788.0" fill="black"/>
+<polyline points="1150,1010 1270,1010" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1270,1010 1255.0,1017.0 1255.0,1003.0" fill="black"/>
+<polyline points="1485,240 1485,350" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1485,350 1478.0,335.0 1492.0,335.0" fill="black"/>
+<polyline points="1485,490 1485,730" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1485,730 1478.0,715.0 1492.0,715.0" fill="black"/>
+<rect x="1353.5" y="597.0" width="263.0" height="25.5" fill="white"/>
+<text x="1485" y="607" font-family="Times New Roman,serif" font-size="23" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Координаты и траектория</text>
+<text x="900" y="1148" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Пунктиром обозначен дополнительный источник измерений высоты.</text>
+</svg>

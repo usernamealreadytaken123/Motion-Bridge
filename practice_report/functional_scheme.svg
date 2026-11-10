@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180">
+<rect width="100%" height="100%" fill="white"/>
+<text x="900.0" y="48" font-family="Times New Roman,serif" font-size="39" font-weight="bold" text-anchor="middle" dominant-baseline="middle">Функциональная схема программного комплекса</text>
+<polyline points="30,280 1160,280 1160,1110 30,1110 30,280" fill="none" stroke="black" stroke-width="2"/>
+<polyline points="1240,280 1770,280 1770,1110 1240,1110 1240,280" fill="none" stroke="black" stroke-width="2"/>
+<text x="595" y="309" font-family="Times New Roman,serif" font-size="30" font-weight="bold" text-anchor="middle" dominant-baseline="middle">Android-приложение</text>
+<text x="1505" y="309" font-family="Times New Roman,serif" font-size="30" font-weight="bold" text-anchor="middle" dominant-baseline="middle">Приложение для ПК</text>
+<polyline points="420,130 730,130 730,240 420,240 420,130" fill="none" stroke="black" stroke-width="2" stroke-dasharray="11 9"/>
+<text x="575.0" y="167.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">iPhone: LiDAR</text>
+<text x="575.0" y="202.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">phyphox (опционально)</text>
+<polyline points="70,350 330,350 330,480 70,480 70,350" fill="none" stroke="black" stroke-width="2"/>
+<text x="200.0" y="380.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Датчики Android:</text>
+<text x="200.0" y="415.0" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">ориентация, гироскоп,</text>
+<text x="200.0" y="450.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">линейное ускорение</text>
+<polyline points="420,350 730,350 730,480 420,480 420,350" fill="none" stroke="black" stroke-width="2"/>
+<text x="575.0" y="380.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Сбор данных датчиков</text>
+<text x="575.0" y="415.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">и обработка</text>
+<text x="575.0" y="450.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">ориентации</text>
+<polyline points="70,590 330,590 330,720 70,720 70,590" fill="none" stroke="black" stroke-width="2"/>
+<text x="200.0" y="637.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Камера Android</text>
+<text x="200.0" y="672.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Видеокадры</text>
+<polyline points="420,575 730,575 730,745 420,745 420,575" fill="none" stroke="black" stroke-width="2"/>
+<text x="575.0" y="607.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Камерная 2D-одометрия</text>
+<text x="575.0" y="642.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Компенсация наклона</text>
+<text x="575.0" y="677.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">и учёт высоты</text>
+<text x="575.0" y="712.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Координаты X, Y</text>
+<polyline points="70,845 330,845 330,955 70,955 70,845" fill="none" stroke="black" stroke-width="2"/>
+<text x="200.0" y="882.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Ручной ввод</text>
+<text x="200.0" y="917.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">высоты камеры</text>
+<polyline points="420,845 730,845 730,975 420,975 420,845" fill="none" stroke="black" stroke-width="2" stroke-dasharray="11 9"/>
+<text x="575.0" y="875.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Получение глубины</text>
+<text x="575.0" y="910.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">и времени измерения</text>
+<text x="575.0" y="945.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">от phyphox</text>
+<polyline points="840,555 1120,555 1120,760 840,760 840,555" fill="none" stroke="black" stroke-width="2"/>
+<text x="980.0" y="605.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Формирование</text>
+<text x="980.0" y="640.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">JSON-пакетов:</text>
+<text x="980.0" y="675.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">данные датчиков,</text>
+<text x="980.0" y="710.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">ориентация и X, Y</text>
+<polyline points="1290,350 1720,350 1720,495 1290,495 1290,350" fill="none" stroke="black" stroke-width="2"/>
+<text x="1505.0" y="387.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Визуализация:</text>
+<text x="1505.0" y="422.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">3D-ориентация, 2D-траектория,</text>
+<text x="1505.0" y="457.5" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">графики датчиков</text>
+<polyline points="1290,555 1720,555 1720,705 1290,705 1290,555" fill="none" stroke="black" stroke-width="2"/>
+<text x="1505.0" y="595.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Приём UDP-пакетов</text>
+<text x="1505.0" y="630.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Проверка и разбор данных</text>
+<text x="1505.0" y="665.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Контроль состояния связи</text>
+<polyline points="1290,805 1720,805 1720,910 1290,910 1290,805" fill="none" stroke="black" stroke-width="2"/>
+<text x="1505.0" y="840.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Запись измерений</text>
+<text x="1505.0" y="875.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">в файл JSONL</text>
+<polyline points="1290,980 1720,980 1720,1070 1290,1070 1290,980" fill="none" stroke="black" stroke-width="2"/>
+<text x="1505.0" y="1025.0" font-family="Times New Roman,serif" font-size="27" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Воспроизведение записи</text>
+<polyline points="330,415 420,415" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="420,415 405.0,422.0 405.0,408.0" fill="black"/>
+<polyline points="575,480 575,575" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="575,575 568.0,560.0 582.0,560.0" fill="black"/>
+<rect x="580.0" y="524.5" width="119.5" height="20.5" fill="white"/>
+<text x="585" y="530" font-family="Times New Roman,serif" font-size="22" font-weight="normal" text-anchor="start" dominant-baseline="middle">ориентация</text>
+<polyline points="330,655 420,655" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="420,655 405.0,662.0 405.0,648.0" fill="black"/>
+<polyline points="730,415 980,415 980,555" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="980,555 973.0,540.0 987.0,540.0" fill="black"/>
+<rect x="748.5" y="390.5" width="218.5" height="20.5" fill="white"/>
+<text x="858" y="396" font-family="Times New Roman,serif" font-size="22" font-weight="normal" text-anchor="middle" dominant-baseline="middle">датчики и ориентация</text>
+<polyline points="730,655 840,655" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="840,655 825.0,662.0 825.0,648.0" fill="black"/>
+<polyline points="330,900 375,900 375,705 420,705" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="420,705 405.0,712.0 405.0,698.0" fill="black"/>
+<polyline points="575,845 575,745" fill="none" stroke="black" stroke-width="2" stroke-dasharray="11 9"/>
+<polygon points="575,745 582.0,760.0 568.0,760.0" fill="black"/>
+<polyline points="730,185 785,185 785,910 730,910" fill="none" stroke="black" stroke-width="2" stroke-dasharray="11 9"/>
+<polygon points="730,910 745.0,903.0 745.0,917.0" fill="black"/>
+<rect x="787.0" y="801.0" width="134.5" height="21.5" fill="white"/>
+<text x="792" y="812" font-family="Times New Roman,serif" font-size="22" font-weight="normal" text-anchor="start" dominant-baseline="middle">HTTP / Wi-Fi</text>
+<polyline points="1120,630 1290,630" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1290,630 1275.0,637.0 1275.0,623.0" fill="black"/>
+<rect x="1143.5" y="598.0" width="123.5" height="21.5" fill="white"/>
+<text x="1205" y="609" font-family="Times New Roman,serif" font-size="22" font-weight="normal" text-anchor="middle" dominant-baseline="middle">UDP / Wi-Fi</text>
+<polyline points="1505,555 1505,495" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1505,495 1512.0,510.0 1498.0,510.0" fill="black"/>
+<polyline points="1505,705 1505,805" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1505,805 1498.0,790.0 1512.0,790.0" fill="black"/>
+<polyline points="1505,910 1505,980" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1505,980 1498.0,965.0 1512.0,965.0" fill="black"/>
+<polyline points="1720,1025 1742,1025 1742,422 1720,422" fill="none" stroke="black" stroke-width="2"/>
+<polygon points="1720,422 1735.0,415.0 1735.0,429.0" fill="black"/>
+<text x="900.0" y="1148" font-family="Times New Roman,serif" font-size="24" font-weight="normal" text-anchor="middle" dominant-baseline="middle">Пунктиром обозначен дополнительный источник данных LiDAR.</text>
+</svg>

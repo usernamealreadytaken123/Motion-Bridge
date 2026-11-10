@@ -10,8 +10,51 @@ import java.util.Locale
 import java.util.UUID
 import com.example.myapplication.vision.PlanarOdometryState
 import com.example.myapplication.vision.PlanarTrackingStatus
+import com.example.myapplication.vision.PlanarOdometryMode
 
 class MotionPacketTest {
+    @Test
+    fun lidarHeightAndFreshnessReachPcWithoutChangingLegacyHeightField() {
+        for (valid in listOf(true, false)) {
+            val json = MotionPacket(123456, 1789999999.123, QuaternionData(1.0, 0.0, 0.0, 0.0),
+                Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.0), sessionId = UUID.randomUUID(),
+                deviceTimestampNanos = 999999999999999, quaternionTimestampNanos = 999999999999999,
+                gyroscopeTimestampNanos = 999999999999999, accelerationTimestampNanos = 999999999999999,
+                planarOdometry = PlanarOdometryState(mode = PlanarOdometryMode.TILT_COMPENSATED,
+                    surfaceDistanceMetres = 1.2, usesLidarHeight = true, heightIsValid = valid,
+                    lidarDepthMetres = if (valid) 1.4 else null, lidarAgeMillis = if (valid) 100.0 else null,
+                    lidarRoundTripMillis = if (valid) 20.0 else null, lidarTimeSeconds = if (valid) 123.4 else null)
+            ).toJson()
+            val data = org.json.JSONObject(json)
+            assertEquals(1.0, data.getDouble("height_above_surface_m"), 1e-9)
+            val planar = data.getJSONObject("planar_odometry")
+            assertEquals("IPHONE_LIDAR", planar.getString("height_source"))
+            assertEquals(valid, planar.getBoolean("height_valid"))
+            assertEquals(1.2, planar.getDouble("surface_distance_m"), 1e-9)
+            assertEquals(!valid, planar.isNull("lidar_depth_m"))
+            assertTrue("LiDAR packet size: ${json.length}", json.toByteArray().size <= 1400)
+        }
+    }
+    @Test
+    fun tiltDiagnosticsAreOptionalFiniteAndFitInOneDatagram() {
+        for (tilt in listOf<Double?>(30.0, null, Double.NaN)) {
+            val json = MotionPacket(1, 1.0, QuaternionData(1.0, 0.0, 0.0, 0.0),
+                Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.0),
+                sessionId = UUID.fromString("12345678-1234-1234-1234-123456789abc"),
+                deviceTimestampNanos = 10, quaternionTimestampNanos = 9,
+                gyroscopeTimestampNanos = 8, accelerationTimestampNanos = 7,
+                planarOdometry = PlanarOdometryState(mode = PlanarOdometryMode.TILT_COMPENSATED,
+                    tiltDegrees = tilt, orientationGapMillis = 20.0, groundResidualMetres = .001),
+            ).toJson()
+            assertTrue(json.contains("\"mode\":\"TILT_COMPENSATED\""))
+            assertTrue(json.contains("\"orientation_gap_ms\":20.00000"))
+            assertTrue(json.contains("\"ground_residual_m\":0.00100"))
+            assertTrue(json.contains(if (tilt == 30.0) "\"tilt_deg\":30.00000" else "\"tilt_deg\":null"))
+            assertTrue(!json.contains("NaN"))
+            assertTrue(json.toByteArray().size <= 1400)
+        }
+    }
+
     @Test
     fun packetSerializesToExpectedJsonShape() {
         val json = MotionPacket(

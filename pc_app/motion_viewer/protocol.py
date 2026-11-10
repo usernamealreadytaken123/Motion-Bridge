@@ -134,6 +134,15 @@ def _parse_planar(value: Any) -> PlanarOdometry | None:
         raise PacketError("Invalid inlier statistics")
     if values["surface_distance_m"] <= 0 or values["image_scale"] <= 0:
         raise PacketError("Distance and scale must be positive")
+    if obj.get("height_source") == "IPHONE_LIDAR":
+        valid_height = _boolean(obj.get("height_valid"), "height_valid")
+        for name in ("lidar_depth_m", "lidar_age_ms", "lidar_rtt_ms", "lidar_time_s"):
+            value = obj.get(name)
+            if value is None:
+                if valid_height:
+                    raise PacketError(f"{name}: required for valid LiDAR height")
+            elif _number(value, name) < 0:
+                raise PacketError(f"{name}: must be nonnegative")
     return PlanarOdometry(
         epoch=_integer(obj.get("epoch"), "epoch"),
         timestamp_ns=_integer(obj.get("timestamp_ns"), "camera timestamp"),

@@ -66,6 +66,15 @@ import com.example.myapplication.ui.theme.MyApplicationTheme
 import com.example.myapplication.vision.CameraOdometryCard
 import com.example.myapplication.vision.CameraOdometryController
 import com.example.myapplication.vision.PlanarOdometryState
+import com.example.myapplication.vision.PlanarTrackingStatus
+import com.example.myapplication.lidar.LidarConnectionCard
+import com.example.myapplication.lidar.LidarConnectionState
+import com.example.myapplication.lidar.PhyphoxConfiguration
+import com.example.myapplication.lidar.PhyphoxLidarClient
+import com.example.myapplication.capture.RawCaptureSender
+import com.example.myapplication.capture.RawCaptureState
+import com.example.myapplication.capture.RawCaptureCard
+import com.example.myapplication.capture.RawEndpoint
 import java.util.Locale
 import kotlin.math.sqrt
 import kotlinx.coroutines.flow.collect
@@ -74,8 +83,12 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private lateinit var streamer: TestPacketStreamer
     private lateinit var cameraOdometryController: CameraOdometryController
+    private lateinit var lidarClient: PhyphoxLidarClient
+    private lateinit var rawSender: RawCaptureSender
+    private var pendingRawEndpoint: RawEndpoint? = null
     private val cameraPermissionGranted = mutableStateOf(false)
     private var pendingUdpEndpoint: Pair<String, Int>? = null
+    private var pendingLidarConfiguration: PhyphoxConfiguration? = null
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { isGranted ->
@@ -88,12 +101,22 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission(),
     ) { isGranted ->
         val endpoint = pendingUdpEndpoint
+        val lidarConfiguration = pendingLidarConfiguration
+        val rawEndpoint = pendingRawEndpoint
+        pendingRawEndpoint = null
         pendingUdpEndpoint = null
+        pendingLidarConfiguration = null
 
         if (isGranted && endpoint != null) {
             streamer.start(endpoint.first, endpoint.second)
-        } else if (::streamer.isInitialized) {
+        } else if (!isGranted && endpoint != null && ::streamer.isInitialized) {
             streamer.showError("Нет разрешения на доступ к локальной сети")
+        }
+        if (lidarConfiguration != null) {
+            if (isGranted) lidarClient.start(lidarConfiguration) else lidarClient.permissionDenied()
+        }
+        if (rawEndpoint != null) {
+            if (isGranted) startRawCapture(rawEndpoint) else rawSender.fail("Нет разрешения на локальную сеть")
         }
     }
     private val orientationController = OrientationController()
@@ -107,8 +130,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         cameraPermissionGranted.value =
             checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        cameraOdometryController = CameraOdometryController(applicationContext)
         sensorCollector = SensorCollector(applicationContext)
+        rawSender = RawCaptureSender()
+        sensorCollector.rawSampleConsumer = rawSender::offerSensor
+        lidarClient = PhyphoxLidarClient(sensorCollector.orientationHistory::at)
+        lidarClient.rawReadingConsumer = rawSender::offerLidar
+        cameraOdometryController = CameraOdometryController(applicationContext,
+            sensorCollector.orientationHistory::at, lidarClient::heightAt)
+        cameraOdometryController.rawSender = rawSender
         streamer = TestPacketStreamer(
             context = applicationContext,
             sensorStateProvider = { sensorCollector.state.value },
@@ -169,6 +198,8 @@ class MainActivity : ComponentActivity() {
                 val velocityState by velocityEstimator.state.collectAsState()
                 val positionState by positionEstimator.state.collectAsState()
                 val planarOdometryState by cameraOdometryController.state.collectAsState()
+                val lidarState by lidarClient.state.collectAsState()
+                val rawCaptureState by rawSender.state.collectAsState()
                 MotionSenderScreen(
                     streamingState = streamingState,
                     sensorState = sensorState,
@@ -179,6 +210,12 @@ class MainActivity : ComponentActivity() {
                     positionState = positionState,
                     planarOdometryState = planarOdometryState,
                     cameraOdometryController = cameraOdometryController,
+                    lidarState = lidarState,
+                    rawCaptureState = rawCaptureState,
+                    onStartRaw = ::startRawCapture,
+                    onStopRaw = rawSender::stop,
+                    onConnectLidar = ::connectLidar,
+                    onDisconnectLidar = lidarClient::stop,
                     cameraPermissionGranted = cameraPermissionGranted.value,
                     onRequestCameraPermission = {
                         cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -210,6 +247,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         streamer.stop()
+        pendingRawEndpoint = null
+        rawSender.stop()
+        pendingUdpEndpoint = null
+        pendingLidarConfiguration = null
+        lidarClient.stop()
+        cameraOdometryController.pauseTracking()
         orientationController.pauseTracking()
         calibrationController.cancelCalibration()
         velocityEstimator.reset()
@@ -220,6 +263,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         streamer.close()
+        rawSender.close()
+        lidarClient.close()
         cameraOdometryController.close()
         sensorCollector.close()
         super.onDestroy()
@@ -237,6 +282,25 @@ class MainActivity : ComponentActivity() {
         }
 
         streamer.start(host, port)
+    }
+
+    private fun connectLidar(configuration: PhyphoxConfiguration) {
+        if (android.os.Build.VERSION.SDK_INT >= ANDROID_17_API_LEVEL &&
+            checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
+            pendingLidarConfiguration = configuration
+            localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+        } else lidarClient.start(configuration)
+    }
+
+    private fun startRawCapture(endpoint: RawEndpoint) {
+        if (android.os.Build.VERSION.SDK_INT >= ANDROID_17_API_LEVEL &&
+            checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
+            pendingRawEndpoint = endpoint
+            localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+            return
+        }
+        if (!endpoint.compare) cameraOdometryController.pauseTracking()
+        rawSender.start(endpoint)
     }
 
     private companion object {
@@ -265,6 +329,12 @@ private fun MotionSenderScreen(
     onResetPosition: () -> Unit,
     onStartCalibration: () -> Unit,
     modifier: Modifier = Modifier,
+    lidarState: LidarConnectionState = LidarConnectionState(),
+    onConnectLidar: (PhyphoxConfiguration) -> Unit = {},
+    onDisconnectLidar: () -> Unit = {},
+    rawCaptureState: RawCaptureState = RawCaptureState(),
+    onStartRaw: (RawEndpoint) -> Unit = {},
+    onStopRaw: () -> Unit = {},
 ) {
     var host by rememberSaveable { mutableStateOf("192.168.1.100") }
     var portText by rememberSaveable { mutableStateOf("5005") }
@@ -314,12 +384,20 @@ private fun MotionSenderScreen(
                 onResetPosition = onResetPosition,
             )
 
+            LidarConnectionCard(lidarState, onConnectLidar, onDisconnectLidar,
+                planarOdometryState.status in setOf(PlanarTrackingStatus.INITIALIZING, PlanarTrackingStatus.TRACKING,
+                    PlanarTrackingStatus.DEGRADED, PlanarTrackingStatus.LOST))
+
             CameraOdometryCard(
                 controller = cameraOdometryController,
                 state = planarOdometryState,
                 cameraPermissionGranted = cameraPermissionGranted,
                 onRequestCameraPermission = onRequestCameraPermission,
+                lidarReady = lidarState.ready,
+                localCalculationAllowed = !rawCaptureState.running || rawCaptureState.compare,
             )
+
+            RawCaptureCard(rawCaptureState, planarOdometryState.isCameraActive, onStartRaw, onStopRaw)
 
             SensorDataCard(
                 state = sensorState,
@@ -732,18 +810,18 @@ private fun FixedHeightCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Высота над поверхностью",
+                text = "Прежнее поле высоты в UDP",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Y = ${heightMeters.formatValue()} м",
+                text = "height_above_surface_m = ${heightMeters.formatValue()} м",
                 style = MaterialTheme.typography.headlineSmall,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Значение задано константой и не зависит от датчиков телефона.",
+                text = "Оставлено для совместимости. Камерная одометрия использует свою h: ручную или от LiDAR, показанную выше.",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

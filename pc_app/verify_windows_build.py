@@ -5,12 +5,13 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 
-def main():
+def main(executable=None):
     project = Path(__file__).resolve().parent
-    executable = project / "dist/MotionViewer.exe"
+    executable = Path(executable).resolve() if executable else project / "dist/MotionViewer.exe"
     report = project / "artifacts" / datetime.now().strftime("build-smoke-%Y%m%d-%H%M%S-%f.json")
     environment = os.environ.copy()
     windows = Path(environment.get("SYSTEMROOT", "C:/Windows"))
@@ -26,7 +27,13 @@ def main():
         if result.returncode:
             raise RuntimeError(f"Executable exited with code {result.returncode}; report: {report}")
         data = json.loads(report.read_text(encoding="utf-8"))
-        if not (data.get("ok") is True and data.get("frozen") is True):
+        if not (data.get("ok") is True and data.get("frozen") is True and data.get("h264_roundtrip") is True
+                and data.get("mp4_odometry", {}).get("source_unchanged") is True
+                and data.get("mp4_odometry", {}).get("recovery_without_reset") is True
+                and data.get("mp4_odometry", {}).get("adjacent_frame_2d") is True
+                and data.get("mp4_odometry", {}).get("missing_motion_skipped") is True
+                and data.get("mp4_odometry", {}).get("final_summary") is True
+                and data.get("mp4_odometry", {}).get("height_100m") is True):
             raise RuntimeError(f"Packaged self-test failed: {data}")
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f"Build verification failed: {exc}")
@@ -36,4 +43,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1] if len(sys.argv) > 1 else None))

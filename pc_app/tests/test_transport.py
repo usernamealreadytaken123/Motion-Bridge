@@ -47,6 +47,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertIsNone(packet.planar_odometry)
         self.assertIn("future_extension", packet.payload)
 
+    def test_tilt_compensation_extension_preserves_existing_xy_and_recorded_diagnostics(self):
+        obj = json.loads(FIXTURE)
+        obj["planar_odometry"].update(mode="TILT_COMPENSATED", tilt_deg=30.0,
+                                     orientation_gap_ms=20.0, ground_residual_m=0.001,
+                                     image_scale=1.0)
+        packet = parse_packet(json.dumps(obj).encode())
+        self.assertEqual(0.42, packet.planar_odometry.x_m)
+        self.assertEqual(-0.18, packet.planar_odometry.y_m)
+        self.assertEqual("TILT_COMPENSATED", packet.payload["planar_odometry"]["mode"])
+        self.assertEqual(30.0, packet.payload["planar_odometry"]["tilt_deg"])
+
     def test_invalid_packets_are_rejected(self):
         bad = [
             b"", b"\xff", b"not json", b"[]", b'{"x":1,"x":2}',
@@ -63,6 +74,25 @@ class ProtocolTests(unittest.TestCase):
             with self.subTest(data=data[:80]):
                 with self.assertRaises(PacketError):
                     parse_packet(data)
+
+    def test_lidar_extension_preserves_height_and_validates_freshness_fields(self):
+        obj = json.loads(FIXTURE)
+        planar = obj["planar_odometry"]
+        planar.update(height_source="IPHONE_LIDAR", height_valid=True,
+                      surface_distance_m=1.2, lidar_depth_m=1.4, lidar_age_ms=50.0,
+                      lidar_rtt_ms=20.0, lidar_time_s=10.5)
+        packet = parse_packet(json.dumps(obj).encode())
+        self.assertEqual(1.2, packet.planar_odometry.surface_distance_m)
+        self.assertEqual(1.4, packet.payload["planar_odometry"]["lidar_depth_m"])
+        for key, value in (("height_valid", "true"), ("lidar_depth_m", "1.4"),
+                           ("lidar_age_ms", -1), ("lidar_rtt_ms", None)):
+            changed = json.loads(json.dumps(obj))
+            changed["planar_odometry"][key] = value
+            with self.subTest(key=key), self.assertRaises(PacketError):
+                parse_packet(json.dumps(changed).encode())
+        planar.update(height_valid=False, status="DEGRADED", lidar_depth_m=None,
+                      lidar_age_ms=None, lidar_rtt_ms=None, lidar_time_s=None)
+        self.assertFalse(parse_packet(json.dumps(obj).encode()).payload["planar_odometry"]["height_valid"])
 
     def test_invalid_camera_quality_is_rejected(self):
         for field, value in [("status", "UNKNOWN"), ("inliers", 500), ("inlier_ratio", 2),

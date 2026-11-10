@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -43,8 +44,12 @@ fun CameraOdometryCard(
     cameraPermissionGranted: Boolean,
     onRequestCameraPermission: () -> Unit,
     modifier: Modifier = Modifier,
+    lidarReady: Boolean = false,
+    localCalculationAllowed: Boolean = true,
 ) {
     var distanceText by rememberSaveable { mutableStateOf("1.00") }
+    var compensateTilt by rememberSaveable { mutableStateOf(true) }
+    var useLidarHeight by rememberSaveable { mutableStateOf(false) }
     val distanceMetres = distanceText.replace(',', '.').toDoubleOrNull()
     val distanceIsValid = distanceMetres != null && distanceMetres in 0.05..20.0
     val trackingIsRunning = state.status in setOf(
@@ -65,7 +70,10 @@ fun CameraOdometryCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Камера должна смотреть перпендикулярно плоской неподвижной поверхности.",
+                text = if (useLidarHeight) "Горизонтальная поверхность; текущая высота поступает с iPhone. Обработка кадров задержана на 200 мс для согласования данных."
+                else if (compensateTilt)
+                    "Горизонтальная неподвижная поверхность; высота h постоянна. Наклон до 55° от направления вниз."
+                else "Прежний режим: камера перпендикулярна плоской неподвижной поверхности.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -97,6 +105,20 @@ fun CameraOdometryCard(
                 }
             }
 
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Компенсация наклона (эксперимент)", modifier = Modifier.weight(1f))
+                Switch(checked = compensateTilt, onCheckedChange = { compensateTilt = it },
+                    enabled = !trackingIsRunning && !useLidarHeight)
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Высота от iPhone LiDAR", modifier = Modifier.weight(1f))
+                Switch(checked = useLidarHeight, onCheckedChange = {
+                    useLidarHeight = it
+                    if (it) compensateTilt = true
+                }, enabled = !trackingIsRunning)
+            }
+
             OutlinedTextField(
                 value = distanceText,
                 onValueChange = { value ->
@@ -105,15 +127,16 @@ fun CameraOdometryCard(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !trackingIsRunning,
-                label = { Text("Расстояние до поверхности, м") },
+                enabled = !trackingIsRunning && !useLidarHeight,
+                label = { Text(if (compensateTilt) "Высота камеры над поверхностью h, м" else "Расстояние до поверхности, м") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 isError = distanceText.isNotBlank() && !distanceIsValid,
                 supportingText = {
                     Text(
                         if (distanceIsValid) {
-                            "Допустимо 0.05–20 м; точность масштаба зависит от этого значения"
+                            if (compensateTilt) "По вертикали от объектива, не вдоль наклонённой камеры. 0.05–20 м."
+                            else "Допустимо 0.05–20 м; точность масштаба зависит от этого значения"
                         } else {
                             "Введите значение от 0.05 до 20 м"
                         },
@@ -127,13 +150,15 @@ fun CameraOdometryCard(
             ) {
                 Button(
                     onClick = {
-                        controller?.startTracking(checkNotNull(distanceMetres))
+                        controller?.startTracking(if (useLidarHeight) 1.0 else checkNotNull(distanceMetres),
+                            compensateTilt, useLidarHeight)
                     },
                     modifier = Modifier.weight(1f),
                     enabled = cameraPermissionGranted &&
+                        localCalculationAllowed &&
                         controller != null &&
                         state.isCameraActive &&
-                        distanceIsValid &&
+                        (if (useLidarHeight) lidarReady else distanceIsValid) &&
                         !trackingIsRunning,
                 ) {
                     Text("Начать")
@@ -165,6 +190,21 @@ fun CameraOdometryCard(
                 text = state.message,
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (useLidarHeight) {
+                Text(if (state.usesLidarHeight && state.heightIsValid)
+                    "Высота камеры h = %.3f м · глубина LiDAR = %.3f м".format(state.surfaceDistanceMetres, state.lidarDepthMetres)
+                else "Ожидаем согласованную высоту LiDAR. Ручное значение не используется.")
+            }
+            if (state.mode == PlanarOdometryMode.TILT_COMPENSATED) {
+                Text(
+                    text = "Наклон: " + (state.tiltDegrees?.let { "%.1f°".format(it) } ?: "—") +
+                        " · интервал IMU: " + (state.orientationGapMillis?.let { "%.0f мс".format(it) } ?: "—") +
+                        " · остаток: " + (state.groundResidualMetres?.let { "%.1f мм".format(it * 1000) } ?: "—"),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text("Пробный режим: монтаж камеры номинальный, калибровка объектива не уточнена. Начните с наклонов до 30°.",
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Text(
                 text = String.format(
                     Locale.US,
@@ -183,13 +223,12 @@ fun CameraOdometryCard(
             Text(
                 text = String.format(
                     Locale.US,
-                    "Точки: %d, inliers: %d (%.0f%%), scale=%.3f, анализ=%.1f FPS",
+                    "Точки: %d, inliers: %d (%.0f%%), анализ=%.1f FPS",
                     state.trackedPoints,
                     state.inliers,
                     state.inlierRatio * 100.0,
-                    state.imageScale,
                     state.framesPerSecond,
-                ),
+                ) + if (state.mode == PlanarOdometryMode.LEGACY) " · scale=%.3f".format(state.imageScale) else "",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -201,7 +240,9 @@ fun CameraOdometryCard(
                 )
             }
             Text(
-                text = "Оси X/Y зафиксированы при нажатии «Начать». Движущиеся объекты и изменение высоты ухудшают результат.",
+                text = "Оси X/Y зафиксированы при нажатии «Начать». " + if (useLidarHeight)
+                    "Быстрые движения, края предметов и потеря Wi-Fi приводят к пропускам; пропущенный путь не восстанавливается."
+                else "Движущиеся объекты и изменение высоты ухудшают результат.",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -1,0 +1,6 @@
+[
+  {"old_angles":[0,0,0],"angles":[0,0,0],"old_height":1,"height":1,"dx":0.05,"dy":0.02},
+  {"old_angles":[20,-8,35],"angles":[30,7,45],"old_height":1,"height":1,"dx":0,"dy":0},
+  {"old_angles":[25,-8,35],"angles":[30,7,45],"old_height":1,"height":1.2,"dx":-0.11,"dy":0.06},
+  {"old_angles":[30,0,80],"angles":[30,0,80],"old_height":0.5,"height":0.7,"dx":0,"dy":0}
+]

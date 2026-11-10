@@ -2,6 +2,10 @@ package com.example.myapplication.vision
 
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import com.example.myapplication.processing.angularDistanceTo
+import com.example.myapplication.sensor.FrameOrientation
+import com.example.myapplication.lidar.LidarFrameHeight
+import com.example.myapplication.lidar.LidarHeightHistory
 import java.nio.ByteBuffer
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -32,6 +36,14 @@ enum class PlanarTrackingStatus {
     ERROR,
 }
 
+enum class PlanarOdometryMode { LEGACY, TILT_COMPENSATED }
+
+data class TiltCameraConfiguration(
+    val sensorOrientationDegrees: Int?,
+    val timestampsAreRealtime: Boolean,
+    val isBackCamera: Boolean,
+)
+
 data class FeatureTrack(
     val fromX: Float,
     val fromY: Float,
@@ -60,6 +72,16 @@ data class PlanarOdometryState(
     val featureTracks: List<FeatureTrack> = emptyList(),
     val message: String = "Камера не запущена",
     val timestampNanos: Long = 0L,
+    val mode: PlanarOdometryMode = PlanarOdometryMode.LEGACY,
+    val tiltDegrees: Double? = null,
+    val orientationGapMillis: Double? = null,
+    val groundResidualMetres: Double? = null,
+    val usesLidarHeight: Boolean = false,
+    val heightIsValid: Boolean = true,
+    val lidarDepthMetres: Double? = null,
+    val lidarAgeMillis: Double? = null,
+    val lidarRoundTripMillis: Double? = null,
+    val lidarTimeSeconds: Double? = null,
 )
 
 data class FrameIntrinsics(
@@ -71,12 +93,12 @@ data class FrameIntrinsics(
 )
 
 /**
- * Sparse planar visual odometry for a downward-facing camera at a fixed distance.
- *
- * The implementation deliberately estimates only a 2D similarity transform. Perspective or scale
- * changes are treated as a violation of the fixed-height/parallel-plane model and are not integrated.
+ * Legacy fixed-height similarity, or orientation-assisted horizontal ray projection.
  */
-class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
+class PlanarOdometryAnalyzer(
+    private val orientationAt: (Long) -> FrameOrientation? = { null },
+    private val lidarHeightAt: (Long) -> LidarFrameHeight? = { null },
+) : ImageAnalysis.Analyzer {
     private val _state = MutableStateFlow(PlanarOdometryState())
     val state: StateFlow<PlanarOdometryState> = _state.asStateFlow()
 
@@ -93,6 +115,19 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
     private var previousPoints: MatOfPoint2f? = null
     private var previousTimestampNanos = 0L
     private var lastAcceptedFrameTimestampNanos = 0L
+    private var mode = PlanarOdometryMode.LEGACY
+    private var tiltConfiguration: TiltCameraConfiguration? = null
+    private var currentPose: GroundCameraPose? = null
+    private var previousPose: GroundCameraPose? = null
+    private var groundAxes: GroundAxes? = null
+    private data class Geometry(val width: Int, val height: Int, val rotation: Int, val intrinsics: FrameIntrinsics)
+    private var geometry: Geometry? = null
+    private var usesLidarHeight = false
+    private var previousHeight = DEFAULT_SURFACE_DISTANCE_METRES
+    private var lidarGeneration: Long? = null
+    private data class PendingFrame(val gray: Mat, val intrinsics: FrameIntrinsics,
+                                    val timestamp: Long, val rotation: Int)
+    private val pendingFrames = java.util.ArrayDeque<PendingFrame>()
 
     fun onCameraStarting() {
         _state.value = _state.value.copy(
@@ -102,8 +137,12 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
         )
     }
 
-    fun onCameraReady(calibration: SensorCameraCalibration?) {
+    @Synchronized
+    fun onCameraReady(calibration: SensorCameraCalibration?, tiltCamera: TiltCameraConfiguration? = null) {
         sensorCalibration = calibration
+        tiltConfiguration = tiltCamera
+        releaseReferenceFrame()
+        clearPendingFrames()
         _state.value = _state.value.copy(
             isCameraActive = true,
             status = if (trackingRequested) {
@@ -122,11 +161,13 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
     fun onCameraStopped() {
         synchronized(this) {
             releaseReferenceFrame()
+            clearPendingFrames()
             lastAcceptedFrameTimestampNanos = 0L
         }
         _state.value = _state.value.copy(
             isCameraActive = false,
             status = PlanarTrackingStatus.STOPPED,
+            heightIsValid = !usesLidarHeight,
             trackedPoints = 0,
             inliers = 0,
             featureTracks = emptyList(),
@@ -138,27 +179,36 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
         trackingRequested = false
         synchronized(this) {
             releaseReferenceFrame()
+            clearPendingFrames()
             lastAcceptedFrameTimestampNanos = 0L
         }
         _state.value = _state.value.copy(
             isCameraActive = false,
             status = PlanarTrackingStatus.ERROR,
+            heightIsValid = !usesLidarHeight,
             featureTracks = emptyList(),
             message = message,
         )
     }
 
     @Synchronized
-    fun startTracking(distanceMetres: Double) {
+    fun startTracking(distanceMetres: Double, requestedMode: PlanarOdometryMode = PlanarOdometryMode.LEGACY,
+                      useLidarHeight: Boolean = false) {
         require(distanceMetres in MIN_SURFACE_DISTANCE_METRES..MAX_SURFACE_DISTANCE_METRES)
+        require(!useLidarHeight || requestedMode == PlanarOdometryMode.TILT_COMPENSATED)
         surfaceDistanceMetres = distanceMetres
+        usesLidarHeight = useLidarHeight
         trackingRequested = true
+        mode = requestedMode
         resetReferenceAndPose()
         _state.value = PlanarOdometryState(
             trackingEpoch = _state.value.trackingEpoch + 1L,
             isCameraActive = _state.value.isCameraActive,
             status = PlanarTrackingStatus.INITIALIZING,
             surfaceDistanceMetres = distanceMetres,
+            mode = mode,
+            usesLidarHeight = usesLidarHeight,
+            heightIsValid = !usesLidarHeight,
             message = "Поиск точек поверхности…",
         )
     }
@@ -167,9 +217,11 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
     fun pauseTracking() {
         trackingRequested = false
         releaseReferenceFrame()
+        clearPendingFrames()
         lastAcceptedFrameTimestampNanos = 0L
         _state.value = _state.value.copy(
             status = PlanarTrackingStatus.STOPPED,
+            heightIsValid = !usesLidarHeight,
             lastDeltaXMetres = 0.0,
             lastDeltaYMetres = 0.0,
             trackedPoints = 0,
@@ -191,6 +243,9 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
                 PlanarTrackingStatus.STOPPED
             },
             surfaceDistanceMetres = surfaceDistanceMetres,
+            mode = mode,
+            usesLidarHeight = usesLidarHeight,
+            heightIsValid = !usesLidarHeight,
             message = if (trackingRequested) {
                 "Траектория сброшена, повторная инициализация…"
             } else {
@@ -221,7 +276,24 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
 
                 synchronized(this) {
                     if (trackingRequested) {
-                        processFrame(gray, intrinsics, timestampNanos)
+                        val nextGeometry = Geometry(gray.cols(), gray.rows(), image.imageInfo.rotationDegrees, intrinsics)
+                        if (geometry != nextGeometry) { releaseReferenceFrame(); clearPendingFrames() }
+                        geometry = nextGeometry
+                        if (usesLidarHeight) {
+                            // Delayed, bounded processing permits interpolation, not stale-height hold.
+                            pendingFrames.addLast(PendingFrame(gray.clone(), intrinsics, timestampNanos, nextGeometry.rotation))
+                            while (pendingFrames.size > 8) pendingFrames.removeFirst().gray.release()
+                            while (pendingFrames.isNotEmpty() &&
+                                timestampNanos - pendingFrames.first.timestamp >= LidarHeightHistory.FRAME_DELAY_NANOS) {
+                                val frame = pendingFrames.removeFirst()
+                                try {
+                                    if (prepareTiltFrame(frame.intrinsics, frame.timestamp, frame.rotation))
+                                        processFrame(frame.gray, frame.intrinsics, frame.timestamp)
+                                } finally { frame.gray.release() }
+                            }
+                        } else if (mode == PlanarOdometryMode.LEGACY || prepareTiltFrame(intrinsics, timestampNanos, nextGeometry.rotation)) {
+                            processFrame(gray, intrinsics, timestampNanos)
+                        }
                         lastAcceptedFrameTimestampNanos = timestampNanos
                     }
                 }
@@ -235,6 +307,55 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
         } finally {
             image.close()
         }
+    }
+
+    private fun prepareTiltFrame(intrinsics: FrameIntrinsics, timestamp: Long, rotation: Int): Boolean {
+        currentPose = null
+        _state.value = _state.value.copy(tiltDegrees = null, orientationGapMillis = null, groundResidualMetres = null,
+            heightIsValid = !usesLidarHeight, lidarDepthMetres = null, lidarAgeMillis = null,
+            lidarRoundTripMillis = null, lidarTimeSeconds = null)
+        val configuration = tiltConfiguration
+        val sample = orientationAt(timestamp)
+        val reason = when {
+            configuration?.isBackCamera != true -> "Компенсация доступна только для задней камеры"
+            !configuration.timestampsAreRealtime -> "Часы камеры не синхронизированы с IMU; используйте прежний режим"
+            configuration.sensorOrientationDegrees !in setOf(0, 90, 180, 270) -> "Неизвестно расположение сенсора камеры"
+            sample == null -> "Нет синхронной ориентации для кадра; ожидаем данные датчиков"
+            else -> null
+        }
+        if (reason != null) {
+            releaseReferenceFrame()
+            publishDegraded(reason, 0, intrinsics = intrinsics, timestampNanos = timestamp)
+            return false
+        }
+        val pose = GroundCameraPose(checkNotNull(sample).quaternion,
+            checkNotNull(configuration?.sensorOrientationDegrees), rotation)
+        _state.value = _state.value.copy(tiltDegrees = pose.tiltDegrees,
+            orientationGapMillis = sample.bracketGapNanos / 1_000_000.0)
+        if (pose.tiltDegrees > MAX_TILT_DEGREES) {
+            releaseReferenceFrame()
+            publishDegraded("Наклон больше 55° от направления вниз; направьте камеру к поверхности",
+                0, intrinsics = intrinsics, timestampNanos = timestamp)
+            return false
+        }
+        currentPose = pose
+        if (usesLidarHeight) {
+            val height = lidarHeightAt(timestamp)
+            if (height == null) {
+                releaseReferenceFrame()
+                publishDegraded("Нет согласованной свежей высоты LiDAR; XY не обновляется",
+                    0, intrinsics = intrinsics, timestampNanos = timestamp)
+                return false
+            }
+            if (lidarGeneration != height.generation) releaseReferenceFrame()
+            lidarGeneration = height.generation
+            surfaceDistanceMetres = height.heightMetres
+            _state.value = _state.value.copy(surfaceDistanceMetres = height.heightMetres, heightIsValid = true,
+                lidarDepthMetres = height.depthMetres, lidarAgeMillis = height.ageMillis,
+                lidarRoundTripMillis = height.roundTripMillis, lidarTimeSeconds = height.experimentTimeSeconds)
+        }
+        if (groundAxes == null) groundAxes = GroundAxes.fromPose(pose)
+        return groundAxes != null
     }
 
     private fun processFrame(
@@ -386,6 +507,11 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
                     timestampNanos = timestampNanos,
                     intrinsics = intrinsics,
                 )
+                return
+            }
+
+            if (mode == PlanarOdometryMode.TILT_COMPENSATED) {
+                integrateGroundMotion(previous, current, homographyInliers, gray, intrinsics, timestampNanos)
                 return
             }
 
@@ -550,6 +676,59 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
         }
     }
 
+    private fun integrateGroundMotion(
+        previous: List<Point>, current: List<Point>, planarIndices: List<Int>, gray: Mat,
+        intrinsics: FrameIntrinsics, timestampNanos: Long,
+    ) {
+        val oldPose = previousPose
+        val newPose = currentPose
+        val axes = groundAxes
+        val elapsed = timestampNanos - previousTimestampNanos
+        if (oldPose == null || newPose == null || axes == null || elapsed !in 1..MAX_FRAME_INTERVAL_NANOS ||
+            oldPose.deviceToWorld.angularDistanceTo(newPose.deviceToWorld) > MAX_STEP_HEADING_RADIANS) {
+            replaceReferenceFrame(gray, timestampNanos)
+            publishDegraded("Пропуск кадров или слишком быстрый поворот; новая опорная пара",
+                previous.size, intrinsics = intrinsics, timestampNanos = timestampNanos)
+            return
+        }
+        val matches = planarIndices.map { i ->
+            PointMatch(ImagePoint(previous[i].x, previous[i].y), ImagePoint(current[i].x, current[i].y))
+        }
+        val estimate = estimateGroundMotion(matches, intrinsics, oldPose, newPose, previousHeight, surfaceDistanceMetres)
+        val indices = estimate?.inlierIndices?.map { planarIndices[it] } ?: emptyList()
+        val ratio = indices.size.toDouble() / previous.size
+        val spreadX = indices.maxOfOrNull { previous[it].x }?.minus(indices.minOf { previous[it].x }) ?: 0.0
+        val spreadY = indices.maxOfOrNull { previous[it].y }?.minus(indices.minOf { previous[it].y }) ?: 0.0
+        if (estimate == null || indices.size < MIN_INLIERS || ratio < MIN_INLIER_RATIO ||
+            spreadX < gray.cols() * 0.15 || spreadY < gray.rows() * 0.15 ||
+            hypot(estimate.delta.xMetres, estimate.delta.yMetres) > MAX_STEP_DISTANCE_METRES) {
+            replaceReferenceFrame(gray, timestampNanos)
+            publishDegraded("Точки не согласуются с горизонтальной плоскостью и заданной h",
+                previous.size, indices.size, timestampNanos, intrinsics)
+            return
+        }
+        val worldDelta = axes.fromWorld(estimate.delta.xMetres, estimate.delta.yMetres)
+        val moving = hypot(worldDelta.xMetres, worldDelta.yMetres) >= MOTION_DEADBAND_PIXELS * estimate.metresPerPixel
+        val dx = if (moving) worldDelta.xMetres else 0.0
+        val dy = if (moving) worldDelta.yMetres else 0.0
+        val oldState = _state.value
+        _state.value = oldState.copy(
+            status = PlanarTrackingStatus.TRACKING,
+            xMetres = oldState.xMetres + dx, yMetres = oldState.yMetres + dy,
+            headingRadians = axes.heading(newPose), lastDeltaXMetres = dx, lastDeltaYMetres = dy,
+            trackedPoints = previous.size, inliers = indices.size, inlierRatio = ratio,
+            imageScale = 1.0, groundResidualMetres = estimate.residualMetres,
+            framesPerSecond = framesPerSecond(elapsed), intrinsicsAreApproximate = intrinsics.isApproximate,
+            frameWidth = gray.cols(), frameHeight = gray.rows(), timestampNanos = timestampNanos,
+            featureTracks = indices.take(MAX_VISIBLE_TRACKS).map { i ->
+                FeatureTrack((previous[i].x / gray.cols()).toFloat(), (previous[i].y / gray.rows()).toFloat(),
+                    (current[i].x / gray.cols()).toFloat(), (current[i].y / gray.rows()).toFloat())
+            },
+            message = if (moving) "Перемещение с компенсацией наклона" else "Смещение ниже порога; наклон учтён",
+        )
+        replaceReferenceFrame(gray, timestampNanos)
+    }
+
     private fun initializeFrom(
         gray: Mat,
         intrinsics: FrameIntrinsics,
@@ -564,6 +743,8 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
                 PlanarTrackingStatus.DEGRADED
             },
             surfaceDistanceMetres = surfaceDistanceMetres,
+            lastDeltaXMetres = 0.0,
+            lastDeltaYMetres = 0.0,
             trackedPoints = count,
             inliers = 0,
             inlierRatio = 0.0,
@@ -608,6 +789,8 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
         previousGray = gray.clone()
         previousPoints = newPoints
         previousTimestampNanos = timestampNanos
+        previousPose = currentPose
+        previousHeight = surfaceDistanceMetres
     }
 
     private fun detectFeatures(gray: Mat): MatOfPoint2f {
@@ -628,8 +811,13 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
 
     private fun resetReferenceAndPose() {
         releaseReferenceFrame()
+        clearPendingFrames()
+        lidarGeneration = null
         previousTimestampNanos = 0L
         lastAcceptedFrameTimestampNanos = 0L
+        groundAxes = null
+        currentPose = null
+        geometry = null
     }
 
     private fun releaseReferenceFrame() {
@@ -638,6 +826,11 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
         previousGray = null
         previousPoints = null
         previousTimestampNanos = 0L
+        previousPose = null
+    }
+
+    private fun clearPendingFrames() {
+        while (pendingFrames.isNotEmpty()) pendingFrames.removeFirst().gray.release()
     }
 
     private fun maskIndices(mask: Mat, fallbackSize: Int): List<Int> {
@@ -735,6 +928,7 @@ class PlanarOdometryAnalyzer : ImageAnalysis.Analyzer {
         const val MAX_SCALE_DEVIATION = 0.06
         const val MAX_STEP_DISTANCE_METRES = 0.30
         const val MAX_STEP_HEADING_RADIANS = 0.45
+        const val MAX_TILT_DEGREES = 55.0
         const val MOTION_DEADBAND_PIXELS = 0.65
         const val MAX_VISIBLE_TRACKS = 100
         const val PROCESSING_PERIOD_NANOS = 66_666_667L

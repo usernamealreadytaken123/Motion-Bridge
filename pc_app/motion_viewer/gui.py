@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSpinBox,
     QSlider, QSplitter, QTabWidget, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy,
 )
 import pyqtgraph as pg
 
@@ -71,6 +72,8 @@ class MotionViewer(QMainWindow):
         self.setStyleSheet(STYLES)
         self.history = DisplayHistory()
         self.worker: ReceiverWorker | None = None
+        self.odometry_window = None
+        self.mp4_window = None
         self._closing = False
         self._stopping = False
         self._display_dropped = 0
@@ -108,7 +111,15 @@ class MotionViewer(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(22, 18, 22, 16)
         root.setSpacing(12)
-        root.addWidget(_label("Motion Viewer", "title"))
+        title_row = QHBoxLayout()
+        title_row.addWidget(_label("Motion Viewer", "title"), 1)
+        self.pc_odometry_button = QPushButton("Расчёт одометрии на ПК · исходные кадры и датчики…")
+        self.pc_odometry_button.clicked.connect(self.open_pc_odometry)
+        title_row.addWidget(self.pc_odometry_button)
+        self.mp4_button = QPushButton("Загрузить MP4…")
+        self.mp4_button.clicked.connect(self.open_mp4)
+        title_row.addWidget(self.mp4_button)
+        root.addLayout(title_row)
         root.addWidget(_label("ANDROID → ПК    /    3D-ОРИЕНТАЦИЯ · ТЕЛЕМЕТРИЯ · 2D-ОДОМЕТРИЯ", "muted"))
         replay_row = QHBoxLayout()
         self.open_button = QPushButton("Открыть JSONL…")
@@ -177,6 +188,7 @@ class MotionViewer(QMainWindow):
         buttons.addWidget(self.start_button)
         buttons.addWidget(self.stop_button)
         form.addRow(buttons)
+        connection.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         left.addWidget(connection)
         self.status_label = _label("Приём остановлен", "status")
         left.addWidget(self.status_label)
@@ -206,7 +218,15 @@ class MotionViewer(QMainWindow):
         left.addWidget(log_button)
         left.addWidget(_label("На телефоне укажите IPv4 компьютера и этот порт.\n"
                               "0.0.0.0 на телефоне указывать нельзя.", "muted"))
-        body.addWidget(sidebar)
+        # More diagnostics and the new entry button must not squeeze network controls
+        # below readable height on smaller screens or with long recording paths.
+        sidebar_scroll = QScrollArea()
+        sidebar_scroll.setWidgetResizable(True)
+        sidebar_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        sidebar_scroll.setMinimumWidth(300)
+        sidebar_scroll.setMaximumWidth(365)
+        sidebar_scroll.setWidget(sidebar)
+        body.addWidget(sidebar_scroll)
 
         content = QWidget()
         right = QVBoxLayout(content)
@@ -466,11 +486,20 @@ class MotionViewer(QMainWindow):
                                  f"Поворот {np.degrees(planar['heading_rad']):+.1f}°   ·   epoch {planar['epoch']}")
                                 if planar else "X: —    Y: —")
         self.camera_label.setText(history.camera_state(now_ns) if history else "Нет данных камеры")
-        self.quality_label.setText((f"Точки: {planar['inliers']}/{planar['tracked_points']}   ·   "
-                                    f"h = {planar['surface_distance_m']:.2f} м\n"
-                                    + ("Параметры камеры приблизительные" if planar['intrinsics_approximate']
-                                       else "Параметры камеры из калибровки"))
-                                   if planar else "Масштаб и качество: —")
+        quality = "Масштаб и качество: —"
+        if planar:
+            lidar = planar.get("height_source") == "IPHONE_LIDAR"
+            valid_height = planar.get("height_valid", False) if lidar else True
+            height = f"h = {planar['surface_distance_m']:.3f} м" if valid_height else "h: нет свежего LiDAR"
+            quality = (f"Точки: {planar['inliers']}/{planar['tracked_points']}   ·   {height}\n"
+                       + ("Параметры камеры приблизительные" if planar['intrinsics_approximate']
+                          else "Параметры камеры из калибровки"))
+            if lidar:
+                quality += "\nИсточник: iPhone LiDAR · синхронизация приблизительная"
+                if valid_height:
+                    quality += (f"\nГлубина {planar['lidar_depth_m']:.3f} м · "
+                                f"RTT {planar['lidar_rtt_ms']:.0f} мс")
+        self.quality_label.setText(quality)
         points = np.asarray(history.trajectory if history else [], dtype=float)
         if points.size:
             self.path_curve.setData(points[:, 0], points[:, 1])
@@ -495,6 +524,18 @@ class MotionViewer(QMainWindow):
             self.sensor_plots[name].setXRange(max(0.0, end - 30), end, padding=0)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self.mp4_window is not None:
+            self.mp4_window.close()
+            if self.mp4_window.worker is not None:
+                QTimer.singleShot(100, self.close)
+                event.ignore()
+                return
+        if self.odometry_window is not None:
+            self.odometry_window.close()
+            if self.odometry_window.worker is not None:
+                QTimer.singleShot(100, self.close)
+                event.ignore()
+                return
         if self.worker is not None or self.replay_loader is not None:
             self._closing = True
             self.stop_receiving()
@@ -515,6 +556,28 @@ class MotionViewer(QMainWindow):
         if self.error_label.text() != message:
             LOGGER.error(message)
         self.error_label.setText(message)
+
+    def open_pc_odometry(self):
+        try:
+            from .odometry_window import OdometryWindow
+            if self.odometry_window is None or not self.odometry_window.isVisible():
+                self.odometry_window = OdometryWindow(self.record_directory, self)
+            self.odometry_window.show()
+            self.odometry_window.raise_()
+        except Exception as exc:
+            self.report_error(f"Не удалось открыть расчёт на ПК: {exc}")
+
+    def open_mp4(self):
+        try:
+            from .mp4_window import Mp4Window
+            if self.mp4_window is None or not self.mp4_window.isVisible():
+                if self.mp4_window is not None:
+                    self.mp4_window.deleteLater()
+                self.mp4_window = Mp4Window(self.record_directory, self)
+            self.mp4_window.show()
+            self.mp4_window.raise_()
+        except Exception as exc:
+            self.report_error(f"Не удалось открыть MP4-режим: {exc}")
 
     def save_preferences(self):
         if not self.preferences:

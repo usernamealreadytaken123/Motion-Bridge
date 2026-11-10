@@ -26,6 +26,155 @@ from pc_app.motion_viewer.preferences import Preferences
 
 @unittest.skipUnless(HAS_GUI, "Install pc_app/requirements-gui.txt to run Qt integration tests")
 class GuiTests(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("cv2"), "MP4 dependencies are required")
+    def test_mp4_focal_control_reaches_engine_manifest_and_display(self):
+        from pc_app.motion_viewer.mp4_smoke import make_clip
+        source = Path(self.directory.name)/"focal.mp4"
+        make_clip(source)
+        self.window.open_mp4()
+        video = self.window.mp4_window
+        video.open_video(source)
+        video.focal.setValue(1.8)
+        self.assertEqual(.05, video.height.minimum())
+        self.assertEqual(100., video.height.maximum())
+        video.height.setValue(100.)
+        video.start()
+        worker = video.worker
+        self.assertFalse(video.focal.isEnabled())
+        self.wait_for(lambda: video.worker is None)
+        self.assertIsNone(worker.update["error"])
+        self.assertAlmostEqual(100*44/1152, worker.update["result"]["x_m"], delta=.02)
+        self.assertIn("1152.0 px", video.metrics.text())
+        manifest = json.loads((Path(video.recording)/"manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(1.8, manifest["focal_factor"])
+        self.assertEqual(100., manifest["height_m"])
+        self.assertEqual(100., worker.update["result"]["height_m"])
+        self.assertEqual(1152., manifest["focal_px"])
+        self.assertTrue(video.focal.isEnabled())
+        summary = worker.update["final_summary"]
+        self.assertTrue(video.summary.isVisible())
+        self.assertEqual(manifest["final_summary"], summary)
+        self.assertTrue(summary["at_video_end"])
+        self.assertIn(f"X = {summary['x_m']:+.3f} м", video.summary.text())
+        self.assertIn(f"Y = {summary['y_m']:+.3f} м", video.summary.text())
+        self.assertEqual(f"Расстояние от (0, 0) по прямой: {summary['distance_from_origin_m']:.3f} м",
+                         video.summary.text().splitlines()[1])
+        self.assertNotIn("√", video.summary.text())
+        self.assertNotIn("не длина пройденного пути", video.summary.text())
+        # Reruns and new selections must not show the previous endpoint.
+        video.start()
+        video.pause()
+        self.assertFalse(video.summary.isVisible())
+        self.assertEqual("", video.summary.text())
+        video.stop()
+        self.wait_for(lambda: video.worker is None)
+        self.assertIn("расчёт отменён", video.summary.text())
+        video.open_video(source)
+        self.assertFalse(video.summary.isVisible())
+        self.assertEqual("", video.summary.text())
+        video.close()
+
+    @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("cv2"), "MP4 dependencies are required")
+    def test_mp4_shows_visual_tracking_without_claiming_metric_motion(self):
+        from unittest.mock import patch
+        from pc_app.motion_viewer.mp4_smoke import make_clip
+        source = Path(self.directory.name)/"visual-only.mp4"
+        make_clip(source)
+        self.window.open_mp4()
+        video = self.window.mp4_window
+        video.open_video(source)
+        with patch("pc_app.motion_viewer.mp4_2d.similarity_step", side_effect=ValueError("2D-модель не согласуется с точками")):
+            video.start()
+            worker = video.worker
+            self.wait_for(lambda: video.worker is None)
+        self.assertEqual(11, worker.update["visual_tracking"])
+        self.assertEqual(0, worker.update["tracking"])
+        self.assertEqual(0., video.marker.xData[0])
+        self.assertIn("точки: отслеживаются", video.metrics.text())
+        self.assertIn("2D-модель не согласуется", video.metrics.text())
+        self.assertIn("наклон не компенсируется", video.metrics.text())
+        self.assertGreater(len(worker.update["result"]["tracks"]), 0)
+        self.assertTrue(video.summary.isVisible())
+        self.assertIn("расстояние недоступны", video.summary.text())
+        self.assertIsNone(worker.update["final_summary"]["distance_from_origin_m"])
+        video.close()
+
+    @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("cv2"), "MP4 dependencies are required")
+    def test_mp4_lost_marker_keeps_last_position(self):
+        from pc_app.motion_viewer.mp4_smoke import make_clip
+        import numpy as np
+        source = Path(self.directory.name)/"lost-at-end.mp4"
+        make_clip(source, blank_indices=(8, 9, 10, 11))
+        self.window.open_mp4()
+        video = self.window.mp4_window
+        video.open_video(source)
+        video.start()
+        worker = video.worker
+        self.wait_for(lambda: video.worker is None)
+        result = worker.update["result"]
+        self.assertEqual("DEGRADED", result["status"])
+        self.assertGreater(result["x_m"], .04)
+        self.assertEqual(result["x_m"], video.marker.xData[0])
+        self.assertEqual(result["y_m"], video.marker.yData[0])
+        self.assertEqual("x", video.marker.opts["symbol"])
+        self.assertIn("Позиция удерживается", video.metrics.text())
+        self.assertIn("последняя рассчитанная позиция", video.status.text())
+        self.assertTrue(np.isnan(video.curve.xData[-1]))
+        manifest = json.loads((Path(video.recording)/"manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(manifest["tracking_lost_at_end"])
+        self.assertEqual("adjacent_frames_keep_position_break_path", manifest["tracking_loss_policy"])
+        self.assertEqual("similarity_2d", manifest["algorithm"])
+        self.assertFalse(manifest["tilt_compensation"])
+        summary = manifest["final_summary"]
+        self.assertFalse(summary["at_video_end"])
+        self.assertAlmostEqual(.7, summary["point_time_s"])
+        self.assertAlmostEqual(1.1, summary["last_processed_time_s"])
+        self.assertIn("Финальная точка видео не определена", video.summary.text())
+        self.assertIn("t = 0.70 с", video.summary.text())
+        self.assertEqual(result["x_m"], summary["x_m"])
+        video.close()
+
+    @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("cv2"), "MP4 dependencies are required")
+    def test_mp4_failed_decode_shows_unavailable_summary(self):
+        source = Path(self.directory.name)/"broken.mp4"
+        source.write_bytes(b"not an mp4")
+        self.window.open_mp4()
+        video = self.window.mp4_window
+        video.open_video(source)
+        video.start()
+        self.wait_for(lambda: video.worker is None)
+        self.assertTrue(video.summary.isVisible())
+        self.assertIn("с ошибкой", video.summary.text())
+        self.assertIn("недоступны", video.summary.text())
+        video.close()
+
+    @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("cv2"), "MP4 dependencies are required")
+    def test_mp4_import_compute_render_and_parent_close_while_paused(self):
+        from pc_app.motion_viewer.mp4_smoke import exercise_mp4, make_clip
+        result = exercise_mp4(self.window, self.wait_for, Path(self.directory.name)/"mp4-smoke.json")
+        self.assertTrue(result["source_unchanged"])
+        self.window.open_mp4()
+        video = self.window.mp4_window
+        source = Path(self.directory.name)/"pause.mp4"
+        make_clip(source, count=40)
+        video.open_video(source)
+        video.start()
+        video.pause()
+        self.assertFalse(video.open_button.isEnabled())
+        self.assertFalse(video.height.isEnabled())
+        self.assertFalse(video.focal.isEnabled())
+        self.window.close()
+        self.wait_for(lambda: video.worker is None and not self.window.isVisible())
+
+    @unittest.skipUnless(importlib.util.find_spec("cv2"), "OpenCV is needed for PC odometry")
+    def test_pc_odometry_tcp_pixels_display_record_recompute_and_close(self):
+        from pc_app.motion_viewer.smoke_test import exercise_pc_odometry
+        result = exercise_pc_odometry(self.window, self.wait_for, Path(self.directory.name)/"raw-smoke.json")
+        self.assertTrue(result["raw_recompute"])
+        self.window.close()
+        self.wait_for(lambda: not self.window.isVisible())
+        self.assertIsNone(self.window.odometry_window.worker)
+
     @classmethod
     def setUpClass(cls):
         cls.application = QApplication.instance() or QApplication([])
@@ -107,6 +256,31 @@ class GuiTests(unittest.TestCase):
         self.window.refresh()
         self.assertEqual([0], list(self.window.path_curve.xData))
         self.assertTrue(self.window.trajectory_plot.getViewBox().state["yInverted"])
+
+    def test_lidar_over_udp_is_displayed_recorded_and_replayed(self):
+        address = self.start()
+        event = display_event(height_source="IPHONE_LIDAR", height_valid=True,
+                              surface_distance_m=1.2, lidar_depth_m=1.4,
+                              lidar_age_ms=50.0, lidar_rtt_ms=20.0, lidar_time_s=10.5)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.sendto(json.dumps(event["payload"]).encode(), address)
+        self.wait_for(lambda: "iPhone LiDAR" in self.window.quality_label.text())
+        self.assertIn("1.200", self.window.quality_label.text())
+        self.assertIn("1.400", self.window.quality_label.text())
+        event = display_event(sequence=1, frame_stamp=200, status="DEGRADED",
+                              height_source="IPHONE_LIDAR", height_valid=False,
+                              lidar_depth_m=None, lidar_age_ms=None, lidar_rtt_ms=None, lidar_time_s=None)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.sendto(json.dumps(event["payload"]).encode(), address)
+        self.wait_for(lambda: "нет свежего LiDAR" in self.window.quality_label.text())
+        path = self.window.record_path
+        self.window.stop_receiving()
+        self.wait_for(lambda: self.window.worker is None)
+        self.assertIn('"height_source":"IPHONE_LIDAR"', path.read_text().replace(" ", ""))
+        self.window.open_recording(path)
+        self.wait_for(lambda: self.window.replay_engine is not None and self.window.replay_engine.cursor > 0)
+        self.assertIn("iPhone LiDAR", self.window.quality_label.text())
+        self.assertIn("1.400", self.window.quality_label.text())
 
     def test_bad_bind_address_and_occupied_port_recover_controls(self):
         self.window.host_edit.setText("not an address")

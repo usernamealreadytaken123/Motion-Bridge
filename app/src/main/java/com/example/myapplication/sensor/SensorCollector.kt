@@ -31,9 +31,12 @@ data class SensorState(
 )
 
 class SensorCollector(context: Context) : SensorEventListener, Closeable {
+    @Volatile var rawSampleConsumer: ((String, Long, DoubleArray) -> Unit)? = null
+    val orientationHistory = OrientationHistory()
     private val sensorManager = context.getSystemService(SensorManager::class.java)
     private val rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val gyroscopeSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+    private val accelerometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val linearAccelerationSensor =
         sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
 
@@ -59,11 +62,13 @@ class SensorCollector(context: Context) : SensorEventListener, Closeable {
     @Synchronized
     fun start() {
         if (isStarted) return
+        orientationHistory.clear()
 
         var registeredAtLeastOneSensor = false
         listOfNotNull(
             rotationVectorSensor,
             gyroscopeSensor,
+            accelerometerSensor,
             linearAccelerationSensor,
         ).forEach { sensor ->
             val registered = sensorManager.registerListener(
@@ -83,6 +88,7 @@ class SensorCollector(context: Context) : SensorEventListener, Closeable {
         if (!isStarted) return
 
         sensorManager.unregisterListener(this)
+        orientationHistory.clear()
         isStarted = false
         _state.value = _state.value.copy(isCollecting = false)
     }
@@ -100,16 +106,24 @@ class SensorCollector(context: Context) : SensorEventListener, Closeable {
                         z = quaternion[3].toDouble(),
                     )
                     quaternionTimestampNanos = event.timestamp
+                    orientationHistory.add(event.timestamp, checkNotNull(latestQuaternion))
+                    rawSampleConsumer?.invoke("q", event.timestamp, doubleArrayOf(quaternion[0].toDouble(),
+                        quaternion[1].toDouble(), quaternion[2].toDouble(), quaternion[3].toDouble()))
                 }
 
                 Sensor.TYPE_GYROSCOPE -> {
                     latestGyroscope = event.values.toVector3()
                     gyroscopeTimestampNanos = event.timestamp
+                    rawSampleConsumer?.invoke("gyro", event.timestamp, DoubleArray(3) { event.values[it].toDouble() })
                 }
+
+                Sensor.TYPE_ACCELEROMETER -> rawSampleConsumer?.invoke("accel", event.timestamp,
+                    DoubleArray(3) { event.values[it].toDouble() })
 
                 Sensor.TYPE_LINEAR_ACCELERATION -> {
                     latestLinearAcceleration = event.values.toVector3()
                     accelerationTimestampNanos = event.timestamp
+                    rawSampleConsumer?.invoke("linear", event.timestamp, DoubleArray(3) { event.values[it].toDouble() })
                 }
             }
 

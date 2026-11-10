@@ -11,7 +11,10 @@
         android:name="android.hardware.camera.any"
         android:required="false" />
 
+    <!-- phyphox exposes HTTP on user-selected LAN IPs. PhyphoxConfiguration rejects
+         public IPs/hostnames and the client never follows redirects. Trusted Wi-Fi only. -->
     <application
+        android:usesCleartextTraffic="true"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

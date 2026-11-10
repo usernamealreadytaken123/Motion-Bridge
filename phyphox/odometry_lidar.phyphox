@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<phyphox version="1.14">
+    <title>Odometry LiDAR</title>
+    <category>Motion Tracker</category>
+    <description>Central depth for a rigid Android and iPhone odometry rig. Rear cameras must have parallel optical axes and see the same horizontal plane. Depth x is in metres; t is experiment time in seconds. The small central ROI is fixed; ARKit temporal smoothing is disabled. Enable remote access and start the measurement manually.</description>
+    <data-containers>
+        <container size="600">x</container>
+        <container size="600">t</container>
+    </data-containers>
+    <input>
+        <depth x1="0.49" x2="0.51" y1="0.49" y2="0.51" mode="average" smooth="false">
+            <output component="z">x</output>
+            <output component="t">t</output>
+        </depth>
+    </input>
+    <views>
+        <view label="Depth">
+            <info label="Rear LiDAR, fixed central area. Aim both cameras at the same flat floor or table. Enable remote access in the menu, then press Start." />
+            <value label="Depth" unit="m" precision="3"><input>x</input></value>
+            <graph label="Depth" labelX="Time (s)" labelY="Depth (m)">
+                <input axis="x">t</input>
+                <input axis="y">x</input>
+            </graph>
+        </view>
+    </views>
+    <export>
+        <set name="LiDAR">
+            <data name="Time (s)">t</data>
+            <data name="Depth (m)">x</data>
+        </set>
+    </export>
+</phyphox>
